@@ -1,0 +1,88 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: near-indexer-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: mainnet
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./docker/clickhouse/init:/docker-entrypoint-initdb.d
+      - ./docker/clickhouse/users.d:/etc/clickhouse-server/users.d
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ulimits:
+      nofile: 262144
+    networks:
+      - indexer-network
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: near-indexer-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - indexer-network
+
+  near-indexer:
+    build: .
+    container_name: near-indexer
+    env_file:
+      - .env.development
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - indexer-network
+    environment:
+      # Database configuration
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: indexer
+      CLICKHOUSE_PASSWORD: indexer_password
+      CLICKHOUSE_DATABASE: mainnet
+      
+      # Redis configuration
+      REDIS_URL: redis://redis:6379
+      
+      # Application configuration
+      INDEXER_ENABLED: "true"
+      BLOCK_HEIGHT: "151592216"
+      CHECKPOINT_ENABLED: "true"
+      CHECKPOINT_INTERVAL_HOURS: "24"
+      CHECKPOINT_CHUNK_SIZE: "100000"
+      CHECKPOINT_MAX_RETRIES: "10"
+      CHECKPOINT_RETRY_DELAY_MS: "5000"
+      
+      # Logging
+      RUST_LOG: "info"
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:
+  redis_data:
+
+networks:
+  indexer-network:
+    driver: bridge 
