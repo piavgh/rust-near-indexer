@@ -1,5 +1,6 @@
 mod config;
 mod database;
+mod postgres_database;
 mod event_handler;
 mod types;
 mod retry;
@@ -7,12 +8,20 @@ mod token_holders_checkpoint;
 
 use crate::config::{init_tracing, AppConfig};
 use crate::database::{get_last_height, init_clickhouse_client, init_redis_client};
+use crate::postgres_database::{get_last_height_postgres, init_postgres_client, check_postgres_connection};
 use crate::event_handler::handle_stream;
 use crate::retry::with_retry;
-use crate::token_holders_checkpoint::TokenHoldersCheckpoint;
+use crate::token_holders_checkpoint::{TokenHoldersCheckpoint, ClickHouseCheckpointDatabase, PostgresCheckpointDatabase};
 use tracing::error;
+use std::env;
+use std::sync::Arc;
 
 use near_lake_framework::LakeConfigBuilder;
+
+pub enum StorageBackend {
+    ClickHouse(clickhouse::Client),
+    PostgreSQL(Arc<tokio_postgres::Client>),
+}
 
 async fn check_clickhouse_connection(client: &clickhouse::Client) -> Result<(), Box<dyn std::error::Error>> {
     println!("Checking ClickHouse connection...");
@@ -42,34 +51,86 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig::from_env();
     config.log_config();
 
-    println!("Initializing ClickHouse client...");
-    let clickhouse_client = init_clickhouse_client();
+    // Check storage backend type from environment variable
+    let storage_backend = env::var("STORAGE_BACKEND")
+        .unwrap_or_else(|_| "clickhouse".to_string())
+        .to_lowercase();
     
-    if let Err(err) = check_clickhouse_connection(&clickhouse_client).await {
-        return Err(format!("ClickHouse health check failed: {}", err).into());
-    }
+    let storage = match storage_backend.as_str() {
+        "postgresql" | "postgres" => {
+            println!("Initializing PostgreSQL client...");
+            let postgres_client = init_postgres_client().await?;
+            
+            let postgres_client_arc = Arc::new(postgres_client);
+            if let Err(err) = check_postgres_connection(&postgres_client_arc).await {
+                return Err(format!("PostgreSQL health check failed: {}", err).into());
+            }
+            println!("PostgreSQL connection successful!");
+            
+            StorageBackend::PostgreSQL(postgres_client_arc)
+        }
+        "clickhouse" | _ => {
+            println!("Initializing ClickHouse client...");
+            let clickhouse_client = init_clickhouse_client();
+            
+            if let Err(err) = check_clickhouse_connection(&clickhouse_client).await {
+                return Err(format!("ClickHouse health check failed: {}", err).into());
+            }
+            
+            StorageBackend::ClickHouse(clickhouse_client)
+        }
+    };
     
     println!("Initializing Redis client...");
     let redis_client = init_redis_client().await;
 
     if config.checkpoint.enabled {
-        let checkpoint_client = clickhouse_client.clone();
-        let checkpoint_config = config.checkpoint.clone();
-        tokio::spawn(async move {
-            let checkpoint = TokenHoldersCheckpoint::new(checkpoint_client, checkpoint_config);
-            if let Err(e) = checkpoint.start().await {
-                error!("Token holders checkpoint job failed: {}", e);
+        match &storage {
+            StorageBackend::ClickHouse(clickhouse_client) => {
+                let checkpoint_client = clickhouse_client.clone();
+                let checkpoint_config = config.checkpoint.clone();
+                tokio::spawn(async move {
+                    let database = ClickHouseCheckpointDatabase::new(checkpoint_client);
+                    let checkpoint = TokenHoldersCheckpoint::new(database, checkpoint_config);
+                    if let Err(e) = checkpoint.start().await {
+                        error!("Token holders checkpoint job failed: {}", e);
+                    }
+                });
             }
-        });
+            StorageBackend::PostgreSQL(postgres_client) => {
+                let checkpoint_client = postgres_client.clone();
+                let checkpoint_config = config.checkpoint.clone();
+                tokio::spawn(async move {
+                    let database = PostgresCheckpointDatabase::new(checkpoint_client);
+                    let checkpoint = TokenHoldersCheckpoint::new(database, checkpoint_config);
+                    if let Err(e) = checkpoint.start().await {
+                        error!("Token holders checkpoint job failed: {}", e);
+                    }
+                });
+            }
+        }
     }
 
     if config.indexer.enabled {
         println!("Getting last processed block height...");
-        let last_height = match get_last_height(&clickhouse_client).await {
-            Ok(height) => height,
-            Err(e) => {
-                println!("Warning: Failed to get last height: {}. Starting from configured block height.", e);
-                0
+        let last_height = match &storage {
+            StorageBackend::ClickHouse(client) => {
+                match get_last_height(client).await {
+                    Ok(height) => height,
+                    Err(e) => {
+                        println!("Warning: Failed to get last height: {}. Starting from configured block height.", e);
+                        0
+                    }
+                }
+            }
+            StorageBackend::PostgreSQL(client) => {
+                match get_last_height_postgres(client).await {
+                    Ok(height) => height,
+                    Err(e) => {
+                        println!("Warning: Failed to get last height: {}. Starting from configured block height.", e);
+                        0
+                    }
+                }
             }
         };
         
@@ -86,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
         println!("Starting stream processing...");
-        handle_stream(lake_config, clickhouse_client, redis_client).await;
+        handle_stream(lake_config, storage, redis_client).await;
     } else {
         println!("Indexer is disabled, waiting for checkpoint job...");
         // Keep the main thread alive

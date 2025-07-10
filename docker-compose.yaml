@@ -1,28 +1,28 @@
 services:
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
-    container_name: near-indexer-clickhouse
-    ports:
-      - "8123:8123"
-      - "9000:9000"
-    environment:
-      CLICKHOUSE_DB: mainnet
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - clickhouse_logs:/var/log/clickhouse-server
-      - ./docker/clickhouse/init:/docker-entrypoint-initdb.d
-      - ./docker/clickhouse/users.d:/etc/clickhouse-server/users.d
-    healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    ulimits:
-      nofile: 262144
-    networks:
-      - indexer-network
+#  clickhouse:
+#    image: clickhouse/clickhouse-server:24.3-alpine
+#    container_name: near-indexer-clickhouse
+#    ports:
+#      - "8123:8123"
+#      - "9000:9000"
+#    environment:
+#      CLICKHOUSE_DB: mainnet
+#      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+#    volumes:
+#      - clickhouse_data:/var/lib/clickhouse
+#      - clickhouse_logs:/var/log/clickhouse-server
+#      - ./docker/clickhouse/init:/docker-entrypoint-initdb.d
+#      - ./docker/clickhouse/users.d:/etc/clickhouse-server/users.d
+#    healthcheck:
+#      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#      start_period: 30s
+#    ulimits:
+#      nofile: 262144
+#    networks:
+#      - indexer-network
 
   redis:
     image: redis:7.4-alpine
@@ -41,10 +41,31 @@ services:
     networks:
       - indexer-network
 
+  postgres:
+    image: postgres:17.5-alpine
+    container_name: near-indexer-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: mainnet
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mainnet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - indexer-network
+
 volumes:
-  clickhouse_data:
-  clickhouse_logs:
+#  clickhouse_data:
+#  clickhouse_logs:
   redis_data:
+  postgres_data:
 
 networks:
   indexer-network:

@@ -1,6 +1,6 @@
 use crate::types::{EventJson, EventRow, ReceiptsCache, ReceiptsCacheArc, ReceiptOrDataId};
 use crate::retry::{with_retry, is_network_error};
-use clickhouse::Client;
+use crate::StorageBackend;
 use futures::StreamExt;
 use near_lake_framework::LakeConfig;
 use near_lake_framework::near_indexer_primitives::{self, StreamerMessage, views::ExecutionStatusView};
@@ -15,7 +15,7 @@ const EVENT_JSON_PREFIX: &str = "EVENT_JSON:";
 const CACHE_SIZE: usize = 10000;
 const CACHE_EXPIRATION_BLOCKS: u64 = 50;
 
-pub async fn handle_stream(config: LakeConfig, client: Client, redis_client: Option<RedisClient>) {
+pub async fn handle_stream(config: LakeConfig, storage: StorageBackend, redis_client: Option<RedisClient>) {
     let (_, stream) = near_lake_framework::streamer(config);
     
     let receipts_cache = match redis_client {
@@ -49,12 +49,12 @@ pub async fn handle_stream(config: LakeConfig, client: Client, redis_client: Opt
     let mut stream = ReceiverStream::new(stream);
     
     while let Some(message) = stream.next().await {
-        let client_ref = &client;
+        let storage_ref = &storage;
         let cache_ref = receipts_cache.clone();
         let block_height = message.block.header.height;
         
         if let Err(e) = with_retry(
-            || async { handle_streamer_message(message.clone(), client_ref, cache_ref.clone()).await },
+            || async { handle_streamer_message(message.clone(), storage_ref, cache_ref.clone()).await },
             3,
             |e| is_network_error(&e.to_string()),
             &format!("process block {}", block_height)
@@ -66,7 +66,7 @@ pub async fn handle_stream(config: LakeConfig, client: Client, redis_client: Opt
 
 async fn handle_streamer_message(
     message: StreamerMessage, 
-    client: &Client, 
+    storage: &StorageBackend, 
     receipts_cache: ReceiptsCacheArc
 ) -> Result<(), Box<dyn std::error::Error>> {
     let header = &message.block.header;
@@ -182,7 +182,14 @@ async fn handle_streamer_message(
 
     // Insert all rows into the database
     if !rows.is_empty() {
-        crate::database::insert_rows(client, &rows).await?;
+        match storage {
+            StorageBackend::ClickHouse(client) => {
+                crate::database::insert_rows(client, &rows).await?;
+            }
+            StorageBackend::PostgreSQL(client) => {
+                crate::postgres_database::insert_rows_postgres(client, &rows).await?;
+            }
+        }
     }
     
     Ok(())
