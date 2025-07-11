@@ -6,6 +6,7 @@ use near_lake_framework::LakeConfig;
 use near_lake_framework::near_indexer_primitives::{self, StreamerMessage, views::ExecutionStatusView};
 use serde_json::from_str;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use redis::Client as RedisClient;
@@ -15,7 +16,7 @@ const EVENT_JSON_PREFIX: &str = "EVENT_JSON:";
 const CACHE_SIZE: usize = 10000;
 const CACHE_EXPIRATION_BLOCKS: u64 = 50;
 
-pub async fn handle_stream(config: LakeConfig, storage: StorageBackend, redis_client: Option<RedisClient>) {
+pub async fn handle_stream(config: LakeConfig, storage: StorageBackend, redis_client: Option<RedisClient>, shutdown_token: CancellationToken) {
     let (_, stream) = near_lake_framework::streamer(config);
     
     let receipts_cache = match redis_client {
@@ -48,18 +49,34 @@ pub async fn handle_stream(config: LakeConfig, storage: StorageBackend, redis_cl
 
     let mut stream = ReceiverStream::new(stream);
     
-    while let Some(message) = stream.next().await {
-        let storage_ref = &storage;
-        let cache_ref = receipts_cache.clone();
-        let block_height = message.block.header.height;
-        
-        if let Err(e) = with_retry(
-            || async { handle_streamer_message(message.clone(), storage_ref, cache_ref.clone()).await },
-            3,
-            |e| is_network_error(&e.to_string()),
-            &format!("process block {}", block_height)
-        ).await {
-            eprintln!("Failed to process block {}: {}", block_height, e);
+    loop {
+        tokio::select! {
+            message = stream.next() => {
+                match message {
+                    Some(msg) => {
+                        let storage_ref = &storage;
+                        let cache_ref = receipts_cache.clone();
+                        let block_height = msg.block.header.height;
+                        
+                        if let Err(e) = with_retry(
+                            || async { handle_streamer_message(msg.clone(), storage_ref, cache_ref.clone()).await },
+                            3,
+                            |e| is_network_error(&e.to_string()),
+                            &format!("process block {}", block_height)
+                        ).await {
+                            eprintln!("Failed to process block {}: {}", block_height, e);
+                        }
+                    }
+                    None => {
+                        println!("Stream ended");
+                        break;
+                    }
+                }
+            }
+            _ = shutdown_token.cancelled() => {
+                println!("Received shutdown signal, stopping stream processing");
+                break;
+            }
         }
     }
 }
@@ -68,7 +85,7 @@ async fn handle_streamer_message(
     message: StreamerMessage, 
     storage: &StorageBackend, 
     receipts_cache: ReceiptsCacheArc
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let header = &message.block.header;
     println!("Processing block {}", header.height);
     

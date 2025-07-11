@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use crate::config::CheckpointConfig;
 use chrono::{DateTime, Utc, TimeZone};
 use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
 
 const NANOS_IN_SECOND: u64 = 1_000_000_000;
 
@@ -391,7 +392,7 @@ impl<T: CheckpointDatabase> TokenHoldersCheckpoint<T> {
         }
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&self, shutdown_token: CancellationToken) -> Result<()> {
         if !self.config.enabled {
             info!("Token holders checkpoint is disabled");
             return Ok(());
@@ -400,23 +401,30 @@ impl<T: CheckpointDatabase> TokenHoldersCheckpoint<T> {
         let mut interval = time::interval(Duration::from_secs(self.config.interval_hours * 3600));
 
         loop {
-            interval.tick().await;
-            
-            let mut is_processing = self.is_processing.lock().await;
-            if *is_processing {
-                warn!("Previous checkpoint job is still running, skipping this iteration");
-                continue;
-            }
-            *is_processing = true;
-            drop(is_processing);
+            tokio::select! {
+                _ = interval.tick() => {
+                    let mut is_processing = self.is_processing.lock().await;
+                    if *is_processing {
+                        warn!("Previous checkpoint job is still running, skipping this iteration");
+                        continue;
+                    }
+                    *is_processing = true;
+                    drop(is_processing);
 
-            if let Err(e) = self.process_checkpoint().await {
-                error!("Failed to process token holders checkpoint: {}", e);
-            }
+                    if let Err(e) = self.process_checkpoint().await {
+                        error!("Failed to process token holders checkpoint: {}", e);
+                    }
 
-            let mut is_processing = self.is_processing.lock().await;
-            *is_processing = false;
+                    let mut is_processing = self.is_processing.lock().await;
+                    *is_processing = false;
+                }
+                _ = shutdown_token.cancelled() => {
+                    info!("Received shutdown signal, stopping token holders checkpoint");
+                    break;
+                }
+            }
         }
+        Ok(())
     }
 
     async fn process_checkpoint(&self) -> Result<()> {

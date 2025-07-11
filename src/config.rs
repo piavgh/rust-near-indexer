@@ -2,10 +2,13 @@ use serde::Deserialize;
 use std::env;
 use tracing::info;
 
+use crate::shutdown_coordinator::ShutdownConfig;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub indexer: IndexerConfig,
     pub checkpoint: CheckpointConfig,
+    pub shutdown: ShutdownConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -36,6 +39,9 @@ impl Default for AppConfig {
                 chunk_size: 100000,
                 max_retries: 10,
                 retry_delay_ms: 5000,
+            },
+            shutdown: ShutdownConfig {
+                shutdown_timeout: std::time::Duration::from_secs(20),
             },
         }
     }
@@ -84,7 +90,8 @@ impl AppConfig {
     pub fn log_config(&self) {
         info!("Application configuration:");
         info!("Indexer: enabled={}", self.indexer.enabled);
-        info!("Checkpoint: enabled={}, interval={}h, chunk_size={}, max_retries={}, retry_delay={}ms",
+        info!(
+            "Checkpoint: enabled={}, interval={}h, chunk_size={}, max_retries={}, retry_delay={}ms",
             self.checkpoint.enabled,
             self.checkpoint.interval_hours,
             self.checkpoint.chunk_size,
@@ -96,7 +103,5 @@ impl AppConfig {
 
 pub fn init_tracing() {
     let env_filter = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 }
