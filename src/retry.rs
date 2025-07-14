@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::time::Duration;
+use tracing::{error, info};
 
 /// Generic retry utility that handles transient errors with exponential backoff
 ///
@@ -30,14 +31,14 @@ where
             Ok(result) => return Ok(result),
             Err(e) => {
                 let error_msg = e.to_string();
-                eprintln!("Error during {}: {}", operation_name, error_msg);
+                error!("Error during {}: {}", operation_name, error_msg);
 
                 if is_retriable_error(&e) {
                     retry_count += 1;
 
                     if retry_count < max_retries {
                         let backoff = get_backoff_duration(retry_count);
-                        println!(
+                        info!(
                             "Retrying {} ({}/{}) in {}ms...",
                             operation_name,
                             retry_count,
