@@ -2,28 +2,66 @@ use crate::database::StorageBackend;
 use crate::retry::{is_network_error, with_retry};
 use crate::types::EventRow;
 use chrono::{DateTime, Utc};
-use tokio_postgres::{Client, NoTls};
+use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod};
+use tokio_postgres::NoTls;
 use tracing::error;
 
 pub struct PostgresDatabase {
-    pub client: Client,
+    pub pool: Pool,
 }
 
 impl PostgresDatabase {
     pub async fn new(connection_string: &str) -> Option<PostgresDatabase> {
-        match tokio_postgres::connect(&connection_string, NoTls).await {
-            Ok((client, connection)) => {
-                // Spawn the connection task in the background
-                tokio::spawn(async move {
-                    if let Err(e) = connection.await {
-                        error!("PostgreSQL connection error: {}", e);
-                    }
-                });
+        let mut config = Config::new();
 
-                Some(PostgresDatabase { client })
+        // Parse connection string to extract components
+        match connection_string.parse::<tokio_postgres::config::Config>() {
+            Ok(pg_config) => {
+                if let Some(host) = pg_config.get_hosts().first() {
+                    config.host = Some(match host {
+                        tokio_postgres::config::Host::Tcp(s) => s.clone(),
+                        tokio_postgres::config::Host::Unix(path) => {
+                            path.to_string_lossy().to_string()
+                        }
+                    });
+                }
+                config.port = pg_config.get_ports().first().copied();
+                config.user = pg_config.get_user().map(|u| u.to_string());
+                config.password = pg_config
+                    .get_password()
+                    .map(|p| String::from_utf8_lossy(p).to_string());
+                config.dbname = pg_config.get_dbname().map(|db| db.to_string());
             }
             Err(e) => {
-                error!("Failed to create PostgreSQL client: {}", e);
+                error!("Failed to parse PostgreSQL connection string: {}", e);
+                return None;
+            }
+        }
+
+        config.manager = Some(ManagerConfig {
+            recycling_method: RecyclingMethod::Fast,
+        });
+
+        match config.create_pool(None, NoTls) {
+            Ok(pool) => {
+                // Test the connection
+                match pool.get().await {
+                    Ok(client) => {
+                        if let Err(e) = client.query_one("SELECT 1", &[]).await {
+                            error!("Failed to test PostgreSQL connection: {}", e);
+                            return None;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to get connection from pool: {}", e);
+                        return None;
+                    }
+                }
+
+                Some(PostgresDatabase { pool })
+            }
+            Err(e) => {
+                error!("Failed to create PostgreSQL connection pool: {}", e);
                 None
             }
         }
@@ -36,6 +74,8 @@ impl PostgresDatabase {
         if rows.is_empty() {
             return Ok(());
         }
+
+        let client = self.pool.get().await?;
 
         // Use batch insert with multiple rows
         for chunk in rows.chunks(100) {
@@ -53,8 +93,20 @@ impl PostgresDatabase {
                     let base = i * 14 + 1;
                     format!(
                         "(${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${})",
-                        base, base + 1, base + 2, base + 3, base + 4, base + 5, base + 6,
-                        base + 7, base + 8, base + 9, base + 10, base + 11, base + 12, base + 13
+                        base,
+                        base + 1,
+                        base + 2,
+                        base + 3,
+                        base + 4,
+                        base + 5,
+                        base + 6,
+                        base + 7,
+                        base + 8,
+                        base + 9,
+                        base + 10,
+                        base + 11,
+                        base + 12,
+                        base + 13
                     )
                 })
                 .collect();
@@ -107,7 +159,7 @@ impl PostgresDatabase {
                 params.push(&row.tx_hash);
             }
 
-            self.client.execute(&query, &params).await?;
+            client.execute(&query, &params).await?;
         }
         Ok(())
     }
@@ -117,13 +169,14 @@ impl PostgresDatabase {
 impl StorageBackend for PostgresDatabase {
     /// Checks if PostgreSQL is available and functioning properly
     async fn check_connection(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.client.query_one("SELECT 1", &[]).await?;
+        let client = self.pool.get().await?;
+        client.query_one("SELECT 1", &[]).await?;
         Ok(())
     }
 
     async fn get_last_height(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        let row = self
-            .client
+        let client = self.pool.get().await?;
+        let row = client
             .query_one("SELECT COALESCE(MAX(block_height), 0) FROM events", &[])
             .await?;
 
