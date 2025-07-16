@@ -44,6 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let connection_string = env::var("POSTGRES_CONNECTION_STRING")
                 .expect("POSTGRES_CONNECTION_STRING not set in environment");
 
+            // Run database migrations
+            info!("Running database migrations...");
+            let migration_pool = sqlx::PgPool::connect(&connection_string).await?;
+            sqlx::migrate!("./migrations").run(&migration_pool).await?;
+            info!("Database migrations completed successfully");
+
             let postgres_database = PostgresDatabase::new(&connection_string)
                 .await
                 .ok_or("Failed to create PostgreSQL database connection")?;
