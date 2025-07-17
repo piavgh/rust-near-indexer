@@ -13,12 +13,19 @@ pub struct AppConfig {
     pub indexer: IndexerConfig,
     pub shutdown: ShutdownConfig,
     pub storage: StorageConfig,
+    pub http: HTTPConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct IndexerConfig {
     pub enabled: bool,
     pub block_height: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HTTPConfig {
+    pub bind_address: String,
+    pub prefix: String,
 }
 
 impl AppConfig {
@@ -35,6 +42,9 @@ impl AppConfig {
                         "CLICKHOUSE_USER",
                         "CLICKHOUSE_PASSWORD",
                         "CLICKHOUSE_DB",
+                        "HTTP_BIND_ADDRESS",
+                        "HTTP_MODE",
+                        "HTTP_PREFIX",
                     ])
                     .map(|k| match k.as_str() {
                         "STORAGE_BACKEND" => "storage.backend".into(),
@@ -43,6 +53,9 @@ impl AppConfig {
                         "CLICKHOUSE_USER" => "storage.clickhouse.user".into(),
                         "CLICKHOUSE_PASSWORD" => "storage.clickhouse.password".into(),
                         "CLICKHOUSE_DB" => "storage.clickhouse.database".into(),
+                        "HTTP_BIND_ADDRESS" => "http.bind_address".into(),
+                        "HTTP_MODE" => "http.mode".into(),
+                        "HTTP_PREFIX" => "http.prefix".into(),
                         _ => k.as_str().into(),
                     })
                     .split(".")

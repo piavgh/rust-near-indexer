@@ -1,3 +1,4 @@
+mod api;
 mod cache;
 mod config;
 mod event_handler;
@@ -84,9 +85,8 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
             // Environment variables required:
             // - `POSTGRES_CONNECTION_STRING` - Full PostgreSQL connection string (e.g., "postgresql://user:password@localhost:5432/database")
             let connection_string = &config.storage.postgres.connection_string;
-
             if connection_string.is_empty() {
-                panic!("No PostgreSQL connection string provided");
+                return Err("No PostgreSQL connection string provided".into());
             }
 
             // Run database migrations
@@ -261,14 +261,79 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
     Ok(())
 }
 
-async fn run_api(_config: AppConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // TODO: Implement API server logic
-    // This is a placeholder for the API server implementation
-    info!("API server functionality not yet implemented");
+async fn run_api(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Initialize storage backend
+    let storage_backend = config.storage.backend;
+    
+    let storage: Arc<dyn StorageBackend> = match storage_backend.as_str() {
+        "postgres" => {
+            info!("Initializing PostgreSQL client for API...");
+            let connection_string = &config.storage.postgres.connection_string;
+            if connection_string.is_empty() {
+                return Err("No PostgreSQL connection string provided".into());
+            }
+            
+            let postgres_database = PostgresDatabase::new(connection_string)
+                .await
+                .ok_or("Failed to create PostgreSQL database connection")?;
+            
+            Arc::new(postgres_database)
+        }
+        "clickhouse" | _ => {
+            info!("Initializing ClickHouse client for API...");
+            let url = &config.storage.clickhouse.url;
+            let user = &config.storage.clickhouse.user;
+            let password = &config.storage.clickhouse.password;
+            let database = &config.storage.clickhouse.database;
+            
+            let clickhouse_db = ClickhouseDatabase::new(url, user, password, database);
+            Arc::new(clickhouse_db)
+        }
+    };
 
-    // For now, just wait for Ctrl+C
-    tokio::signal::ctrl_c().await?;
+    // Check storage connection
+    if let Err(err) = storage.check_connection().await {
+        return Err(format!("{} health check failed: {}", storage_backend, err).into());
+    }
+    info!("{} connection successful!", storage_backend);
+
+    // Create the Axum router
+    let app = api::create_router(storage, &config.http);
+
+    // Start the server
+    let listener = tokio::net::TcpListener::bind(&config.http.bind_address).await?;
+    info!("🚀 API server started on http://{}", config.http.bind_address);
+    
+    // Set up graceful shutdown
+    let shutdown_signal = async {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                info!("🛑 Received SIGINT (Ctrl+C)");
+            }
+            _ = async {
+                #[cfg(unix)]
+                {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let mut sigterm = signal(SignalKind::terminate()).unwrap();
+                    sigterm.recv().await;
+                }
+                #[cfg(not(unix))]
+                {
+                    // On Windows, we can only listen for Ctrl+C
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                info!("🛑 Received SIGTERM");
+            }
+        }
+        info!("🔄 Initiating graceful shutdown...");
+    };
+
+    // Start the server with graceful shutdown
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal)
+        .await?;
+
     info!("🎉 API server shutdown complete!");
-
     Ok(())
 }

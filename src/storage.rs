@@ -27,4 +27,12 @@ pub trait StorageBackend: Send + Sync {
         &self,
         rows: &[EventRow],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Get events from the database with optional tx_hash filter
+    async fn get_events(
+        &self,
+        tx_hash: Option<String>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<EventRow>, u32), Box<dyn std::error::Error + Send + Sync>>;
 }

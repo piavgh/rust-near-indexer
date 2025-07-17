@@ -204,4 +204,80 @@ impl StorageBackend for PostgresDatabase {
         )
         .await
     }
+
+    async fn get_events(
+        &self,
+        tx_hash: Option<String>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<EventRow>, u32), Box<dyn std::error::Error + Send + Sync>> {
+        let client = self.pool.get().await?;
+        
+        let mut query = "SELECT 
+            block_height,
+            block_timestamp,
+            block_hash,
+            contract_id,
+            execution_status,
+            version,
+            standard,
+            index_in_log,
+            event,
+            data,
+            related_receipt_id,
+            related_receipt_receiver_id,
+            related_receipt_predecessor_id,
+            tx_hash
+        FROM events".to_string();
+        
+        let mut count_query = "SELECT count(*) FROM events".to_string();
+        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+        let mut count_params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+        
+        if let Some(tx_hash) = &tx_hash {
+            let where_clause = " WHERE tx_hash = $1";
+            query.push_str(where_clause);
+            count_query.push_str(where_clause);
+            params.push(tx_hash);
+            count_params.push(tx_hash);
+        }
+        
+        query.push_str(" ORDER BY block_height DESC, index_in_log DESC");
+        
+        let param_offset = if tx_hash.is_some() { 2 } else { 1 };
+        query.push_str(&format!(" LIMIT ${} OFFSET ${}", param_offset, param_offset + 1));
+        
+        let limit_i64 = limit as i64;
+        let offset_i64 = offset as i64;
+        params.push(&limit_i64);
+        params.push(&offset_i64);
+
+        let events_future = client.query(&query, &params);
+        let count_future = client.query_one(&count_query, &count_params);
+
+        let (events_result, count_result) = tokio::try_join!(events_future, count_future)?;
+        
+        let events: Vec<EventRow> = events_result
+            .into_iter()
+            .map(|row| EventRow {
+                block_height: row.get::<_, i64>(0) as u64,
+                block_timestamp: row.get::<_, DateTime<Utc>>(1).timestamp_nanos_opt().unwrap_or(0) as u64,
+                block_hash: row.get(2),
+                contract_id: row.get(3),
+                execution_status: row.get(4),
+                version: row.get(5),
+                standard: row.get(6),
+                index_in_log: row.get::<_, i64>(7) as u64,
+                event: row.get(8),
+                data: row.get(9),
+                related_receipt_id: row.get(10),
+                related_receipt_receiver_id: row.get(11),
+                related_receipt_predecessor_id: row.get(12),
+                tx_hash: row.get(13),
+            })
+            .collect();
+
+        let total_count: i64 = count_result.get(0);
+        Ok((events, total_count as u32))
+    }
 }

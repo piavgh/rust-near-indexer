@@ -1,9 +1,17 @@
 env: production
+
+http:
+  bind_address: "0.0.0.0:3000"
+  mode: "development"
+  prefix: "/api/v1"
+
 indexer:
   enabled: true
   block_height: 151592216
+
 shutdown:
   shutdown_timeout: 20s
+
 storage:
   backend: postgres
   postgres:

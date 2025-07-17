@@ -17,7 +17,7 @@ pub struct ClickhouseDatabase {
     pub client: Client,
 }
 
-#[derive(Row, serde::Serialize)]
+#[derive(Row, serde::Serialize, serde::Deserialize)]
 struct ClickhouseEventRow {
     block_height: u64,
     block_timestamp: u64,
@@ -131,5 +131,67 @@ impl StorageBackend for ClickhouseDatabase {
             "clickhouse insert",
         )
         .await
+    }
+
+    async fn get_events(
+        &self,
+        tx_hash: Option<String>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<EventRow>, u32), Box<dyn std::error::Error + Send + Sync>> {
+        let mut query = "SELECT 
+            block_height,
+            block_timestamp,
+            block_hash,
+            contract_id,
+            execution_status,
+            version,
+            standard,
+            index_in_log,
+            event,
+            data,
+            related_receipt_id,
+            related_receipt_receiver_id,
+            related_receipt_predecessor_id,
+            tx_hash
+        FROM events".to_string();
+        
+        let mut count_query = "SELECT count(*) FROM events".to_string();
+        
+        if let Some(tx_hash) = &tx_hash {
+            let where_clause = format!(" WHERE tx_hash = '{}'", tx_hash);
+            query.push_str(&where_clause);
+            count_query.push_str(&where_clause);
+        }
+        
+        query.push_str(" ORDER BY block_height DESC, index_in_log DESC");
+        query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+
+        let events_future = self.client.query(&query).fetch_all::<ClickhouseEventRow>();
+        let count_future = self.client.query(&count_query).fetch_one::<u64>();
+
+        let (events_result, count_result) = tokio::try_join!(events_future, count_future)?;
+        
+        let events: Vec<EventRow> = events_result
+            .into_iter()
+            .map(|row| EventRow {
+                block_height: row.block_height,
+                block_timestamp: row.block_timestamp,
+                block_hash: row.block_hash,
+                contract_id: row.contract_id,
+                execution_status: row.execution_status,
+                version: row.version,
+                standard: row.standard,
+                index_in_log: row.index_in_log,
+                event: row.event,
+                data: row.data,
+                related_receipt_id: row.related_receipt_id,
+                related_receipt_receiver_id: row.related_receipt_receiver_id,
+                related_receipt_predecessor_id: row.related_receipt_predecessor_id,
+                tx_hash: row.tx_hash,
+            })
+            .collect();
+
+        Ok((events, count_result as u32))
     }
 }
