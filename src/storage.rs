@@ -1,7 +1,17 @@
 pub mod clickhouse;
 pub mod postgres;
 
+use crate::storage::clickhouse::ClickhouseConfig;
+use crate::storage::postgres::PostgresConfig;
 use crate::types::EventRow;
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StorageConfig {
+    pub backend: String,
+    pub postgres: PostgresConfig,
+    pub clickhouse: ClickhouseConfig,
+}
 
 /// Common interface for storage backends
 #[async_trait::async_trait]

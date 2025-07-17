@@ -7,6 +7,7 @@ use tracing::info;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ShutdownConfig {
+    #[serde(with = "humantime_serde")]
     pub shutdown_timeout: std::time::Duration,
 }
 

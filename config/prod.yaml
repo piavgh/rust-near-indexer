@@ -1,0 +1,15 @@
+env: production
+indexer:
+  enabled: true
+  block_height: 151592216
+shutdown:
+  shutdown_timeout: 20s
+storage:
+  backend: postgres
+  postgres:
+    connection_string: ""
+  clickhouse:
+    url: ""
+    user: ""
+    password: ""
+    database: ""

@@ -1,8 +1,17 @@
-use crate::database::StorageBackend;
+use crate::storage::StorageBackend;
 use crate::retry::{is_network_error, with_retry};
 use crate::types::EventRow;
 use clickhouse::{Client, Row};
+use serde::Deserialize;
 use tracing::info;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClickhouseConfig {
+    pub url: String,
+    pub user: String,
+    pub password: String,
+    pub database: String,
+}
 
 pub struct ClickhouseDatabase {
     pub client: Client,

@@ -1,10 +1,16 @@
-use crate::database::StorageBackend;
 use crate::retry::{is_network_error, with_retry};
+use crate::storage::StorageBackend;
 use crate::types::EventRow;
 use chrono::{DateTime, Utc};
 use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod};
+use serde::Deserialize;
 use tokio_postgres::NoTls;
 use tracing::error;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PostgresConfig {
+    pub connection_string: String,
+}
 
 pub struct PostgresDatabase {
     pub pool: Pool,

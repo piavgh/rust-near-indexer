@@ -1,13 +1,18 @@
+use figment::Figment;
+use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
 use std::env;
 use tracing::info;
 
 use crate::shutdown_coordinator::ShutdownConfig;
+use crate::storage::StorageConfig;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
+    pub env: String,
     pub indexer: IndexerConfig,
     pub shutdown: ShutdownConfig,
+    pub storage: StorageConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -16,39 +21,40 @@ pub struct IndexerConfig {
     pub block_height: u64,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            indexer: IndexerConfig {
-                enabled: true,
-                block_height: 0,
-            },
-            shutdown: ShutdownConfig {
-                shutdown_timeout: std::time::Duration::from_secs(20),
-            },
-        }
-    }
-}
-
 impl AppConfig {
-    pub fn from_env() -> Self {
-        let mut config = Self::default();
+    pub fn new(config_path: &str) -> anyhow::Result<Self> {
+        let config: AppConfig = Figment::new()
+            .merge(Yaml::file(config_path))
+            // Manually map environment variables to config fields:
+            .merge(
+                Env::raw()
+                    .only(&[
+                        "STORAGE_BACKEND",
+                        "POSTGRES_CONNECTION_STRING",
+                        "CLICKHOUSE_URL",
+                        "CLICKHOUSE_USER",
+                        "CLICKHOUSE_PASSWORD",
+                        "CLICKHOUSE_DB",
+                    ])
+                    .map(|k| match k.as_str() {
+                        "STORAGE_BACKEND" => "storage.backend".into(),
+                        "POSTGRES_CONNECTION_STRING" => "storage.postgres.connection_string".into(),
+                        "CLICKHOUSE_URL" => "storage.clickhouse.url".into(),
+                        "CLICKHOUSE_USER" => "storage.clickhouse.user".into(),
+                        "CLICKHOUSE_PASSWORD" => "storage.clickhouse.password".into(),
+                        "CLICKHOUSE_DB" => "storage.clickhouse.database".into(),
+                        _ => k.as_str().into(),
+                    })
+                    .split(".")
+            )
+            .merge(Env::prefixed("APP__").split("__"))
+            .extract()?;
 
-        if let Ok(enabled) = env::var("INDEXER_ENABLED") {
-            config.indexer.enabled = enabled.to_lowercase() == "true";
-        }
-        if let Ok(block_height) = env::var("BLOCK_HEIGHT") {
-            if let Ok(height) = block_height.parse() {
-                config.indexer.block_height = height;
-            }
-        }
-
-        config
+        Ok(config)
     }
 
     pub fn log_config(&self) {
-        info!("Application configuration:");
-        info!("Indexer: enabled={}", self.indexer.enabled);
+        info!("config: {:?}", self);
     }
 }
 

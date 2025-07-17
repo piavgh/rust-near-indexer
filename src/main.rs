@@ -1,19 +1,21 @@
 mod cache;
 mod config;
-mod database;
 mod event_handler;
 mod retry;
 mod shutdown_coordinator;
+mod storage;
 mod types;
 
 use crate::cache::receipts_cache::ReceiptsCache;
 use crate::cache::{CACHE_EXPIRATION_BLOCKS, CACHE_SIZE};
 use crate::config::{AppConfig, init_tracing};
-use crate::database::StorageBackend;
-use crate::database::clickhouse::ClickhouseDatabase;
-use crate::database::postgres::PostgresDatabase;
 use crate::event_handler::EventHandler;
 use crate::shutdown_coordinator::ShutdownCoordinator;
+use crate::storage::StorageBackend;
+use crate::storage::clickhouse::ClickhouseDatabase;
+use crate::storage::postgres::PostgresDatabase;
+use clap::Parser;
+use dotenvy::dotenv;
 use near_lake_framework::LakeConfigBuilder;
 use redis::cmd;
 use std::env;
@@ -21,18 +23,58 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+#[derive(Parser, Debug)]
+#[clap(author = "Hoang Trinh <hoang.trinhj@gmail.com>", version, about)]
+/// NEAR Defuse Indexer and API
+struct Arguments {
+    #[arg(short = 'c', long)]
+    config: Option<String>,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Parser, Debug)]
+enum Commands {
+    /// Run the indexer to process blockchain events
+    Indexer,
+    /// Run the API server
+    Api,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    init_tracing();
-    info!("Starting NEAR Defuse Indexer...");
+    dotenv().ok();
 
-    let config = AppConfig::from_env();
+    let args = Arguments::parse();
+
+    if args.config.is_none() {
+        panic!("No config file provided");
+    }
+
+    init_tracing();
+
+    let config = AppConfig::new(&args.config.unwrap())?;
     config.log_config();
 
+    info!("ENV: {}", config.env);
+
+    match args.command {
+        Commands::Indexer => {
+            info!("Starting NEAR Intents Indexer...");
+            run_indexer(config).await?;
+        }
+        Commands::Api => {
+            info!("Starting API server...");
+            run_api(config).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Check storage backend type from environment variable
-    let storage_backend = env::var("STORAGE_BACKEND")
-        .expect("STORAGE_BACKEND must be set")
-        .to_lowercase();
+    let storage_backend = config.storage.backend;
 
     let storage: Box<dyn StorageBackend> = match storage_backend.as_str() {
         "postgres" => {
@@ -41,16 +83,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Initializes the PostgreSQL client using environment variables.
             // Environment variables required:
             // - `POSTGRES_CONNECTION_STRING` - Full PostgreSQL connection string (e.g., "postgresql://user:password@localhost:5432/database")
-            let connection_string = env::var("POSTGRES_CONNECTION_STRING")
-                .expect("POSTGRES_CONNECTION_STRING not set in environment");
+            let connection_string = &config.storage.postgres.connection_string;
+
+            if connection_string.is_empty() {
+                panic!("No PostgreSQL connection string provided");
+            }
 
             // Run database migrations
             info!("Running database migrations...");
-            let migration_pool = sqlx::PgPool::connect(&connection_string).await?;
+            let migration_pool = sqlx::PgPool::connect(connection_string).await?;
             sqlx::migrate!("./migrations").run(&migration_pool).await?;
             info!("Database migrations completed successfully");
 
-            let postgres_database = PostgresDatabase::new(&connection_string)
+            let postgres_database = PostgresDatabase::new(connection_string)
                 .await
                 .ok_or("Failed to create PostgreSQL database connection")?;
 
@@ -65,14 +110,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // - `CLICKHOUSE_USER`
             // - `CLICKHOUSE_PASSWORD`
             // - `CLICKHOUSE_DATABASE`
-            let url = env::var("CLICKHOUSE_URL").expect("CLICKHOUSE_URL not set in environment");
-            let user = env::var("CLICKHOUSE_USER").expect("CLICKHOUSE_USER not set in environment");
-            let password = env::var("CLICKHOUSE_PASSWORD")
-                .expect("CLICKHOUSE_PASSWORD not set in environment");
-            let database = env::var("CLICKHOUSE_DATABASE")
-                .expect("CLICKHOUSE_DATABASE not set in environment");
+            let url = &config.storage.clickhouse.url;
+            let user = &config.storage.clickhouse.user;
+            let password = &config.storage.clickhouse.password;
+            let database = &config.storage.clickhouse.database;
 
-            let clickhouse_db = ClickhouseDatabase::new(&url, &user, &password, &database);
+            let clickhouse_db = ClickhouseDatabase::new(url, user, password, database);
 
             Box::new(clickhouse_db)
         }
@@ -214,6 +257,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     signal_handle.await?;
 
     info!("🎉 Indexer shutdown complete!");
+
+    Ok(())
+}
+
+async fn run_api(_config: AppConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // TODO: Implement API server logic
+    // This is a placeholder for the API server implementation
+    info!("API server functionality not yet implemented");
+
+    // For now, just wait for Ctrl+C
+    tokio::signal::ctrl_c().await?;
+    info!("🎉 API server shutdown complete!");
 
     Ok(())
 }

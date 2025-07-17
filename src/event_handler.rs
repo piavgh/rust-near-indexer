@@ -1,6 +1,6 @@
 use crate::cache::ReceiptOrDataId;
 use crate::cache::receipts_cache::ReceiptsCacheArc;
-use crate::database::StorageBackend;
+use crate::storage::StorageBackend;
 use crate::retry::{is_network_error, with_retry};
 use crate::types::{EventJson, EventRow};
 use futures::StreamExt;
