@@ -1,5 +1,5 @@
-use crate::storage::StorageBackend;
 use crate::retry::{is_network_error, with_retry};
+use crate::storage::StorageBackend;
 use crate::types::{EventRow, SwapRow};
 use clickhouse::{Client, Row};
 use serde::Deserialize;
@@ -175,7 +175,8 @@ impl StorageBackend for ClickhouseDatabase {
         swaps: &[SwapRow],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Convert SwapRow to ClickhouseSwapRow
-        let clickhouse_swaps: Vec<ClickhouseSwapRow> = swaps.iter().map(|swap| swap.into()).collect();
+        let clickhouse_swaps: Vec<ClickhouseSwapRow> =
+            swaps.iter().map(|swap| swap.into()).collect();
 
         with_retry(
             || async { self.insert_swaps_internal(&clickhouse_swaps).await },
@@ -207,16 +208,17 @@ impl StorageBackend for ClickhouseDatabase {
             related_receipt_receiver_id,
             related_receipt_predecessor_id,
             tx_hash
-        FROM events".to_string();
-        
+        FROM events"
+            .to_string();
+
         let mut count_query = "SELECT count(*) FROM events".to_string();
-        
+
         if let Some(tx_hash) = &tx_hash {
             let where_clause = format!(" WHERE tx_hash = '{}'", tx_hash);
             query.push_str(&where_clause);
             count_query.push_str(&where_clause);
         }
-        
+
         query.push_str(" ORDER BY block_height DESC, index_in_log DESC");
         query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
 
@@ -224,7 +226,7 @@ impl StorageBackend for ClickhouseDatabase {
         let count_future = self.client.query(&count_query).fetch_one::<u64>();
 
         let (events_result, count_result) = tokio::try_join!(events_future, count_future)?;
-        
+
         let events: Vec<EventRow> = events_result
             .into_iter()
             .map(|row| EventRow {
@@ -246,5 +248,45 @@ impl StorageBackend for ClickhouseDatabase {
             .collect();
 
         Ok((events, count_result as u32))
+    }
+
+    async fn get_swap_by_intent_hash(
+        &self,
+        intent_hash: &str,
+    ) -> Result<Option<SwapRow>, Box<dyn std::error::Error + Send + Sync>> {
+        let query = format!(
+            "SELECT 
+                intent_hash, 
+                origin_asset, 
+                destination_asset, 
+                amount_in, 
+                amount_out, 
+                recipient, 
+                tx_hash 
+            FROM swaps 
+            WHERE intent_hash = '{}'",
+            intent_hash
+        );
+
+        let results = self
+            .client
+            .query(&query)
+            .fetch_all::<ClickhouseSwapRow>()
+            .await?;
+
+        if results.is_empty() {
+            return Ok(None);
+        }
+
+        let row = &results[0];
+        Ok(Some(SwapRow {
+            intent_hash: row.intent_hash.clone(),
+            origin_asset: row.origin_asset.clone(),
+            destination_asset: row.destination_asset.clone(),
+            amount_in: row.amount_in.clone(),
+            amount_out: row.amount_out.clone(),
+            recipient: row.recipient.clone(),
+            tx_hash: row.tx_hash.clone(),
+        }))
     }
 }

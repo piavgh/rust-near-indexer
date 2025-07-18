@@ -41,4 +41,10 @@ pub trait StorageBackend: Send + Sync {
         limit: u32,
         offset: u32,
     ) -> Result<(Vec<EventRow>, u32), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Get swap by intent hash
+    async fn get_swap_by_intent_hash(
+        &self,
+        intent_hash: &str,
+    ) -> Result<Option<SwapRow>, Box<dyn std::error::Error + Send + Sync>>;
 }

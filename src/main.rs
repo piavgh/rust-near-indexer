@@ -267,7 +267,7 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
 async fn run_api(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize storage backend
     let storage_backend = config.storage.backend;
-    
+
     let storage: Arc<dyn StorageBackend> = match storage_backend.as_str() {
         "postgres" => {
             info!("Initializing PostgreSQL client for API...");
@@ -275,11 +275,11 @@ async fn run_api(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Se
             if connection_string.is_empty() {
                 return Err("No PostgreSQL connection string provided".into());
             }
-            
+
             let postgres_database = PostgresDatabase::new(connection_string)
                 .await
                 .ok_or("Failed to create PostgreSQL database connection")?;
-            
+
             Arc::new(postgres_database)
         }
         "clickhouse" | _ => {
@@ -288,7 +288,7 @@ async fn run_api(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Se
             let user = &config.storage.clickhouse.user;
             let password = &config.storage.clickhouse.password;
             let database = &config.storage.clickhouse.database;
-            
+
             let clickhouse_db = ClickhouseDatabase::new(url, user, password, database);
             Arc::new(clickhouse_db)
         }
@@ -305,8 +305,11 @@ async fn run_api(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Se
 
     // Start the server
     let listener = tokio::net::TcpListener::bind(&config.http.bind_address).await?;
-    info!("🚀 API server started on http://{}", config.http.bind_address);
-    
+    info!(
+        "🚀 API server started on http://{}",
+        config.http.bind_address
+    );
+
     // Set up graceful shutdown
     let shutdown_signal = async {
         tokio::select! {

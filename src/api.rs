@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     routing::get,
@@ -12,7 +12,7 @@ use tracing::info;
 
 use crate::config::HTTPConfig;
 use crate::storage::StorageBackend;
-use crate::types::EventRow;
+use crate::types::{EventRow, SwapRow};
 
 #[derive(Debug, Deserialize)]
 pub struct EventsQuery {
@@ -65,6 +65,38 @@ pub async fn get_events(
     }
 }
 
+pub async fn get_swap_by_intent_hash(
+    State(state): State<Arc<ApiState>>,
+    Path(intent_hash): Path<String>,
+) -> Result<Json<SwapRow>, (StatusCode, Json<ErrorResponse>)> {
+    info!("Fetching swap by intent_hash: {}", intent_hash);
+
+    match state.storage.get_swap_by_intent_hash(&intent_hash).await {
+        Ok(Some(swap)) => {
+            info!("Successfully fetched swap for intent_hash: {}", intent_hash);
+            Ok(Json(swap))
+        }
+        Ok(None) => {
+            info!("No swap found for intent_hash: {}", intent_hash);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "Swap not found".to_string(),
+                }),
+            ))
+        }
+        Err(err) => {
+            tracing::error!("Error fetching swap: {}", err);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to fetch swap".to_string(),
+                }),
+            ))
+        }
+    }
+}
+
 pub async fn health_check() -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     Ok(Json(serde_json::json!({
         "status": "healthy",
@@ -75,9 +107,27 @@ pub async fn health_check() -> Result<Json<serde_json::Value>, (StatusCode, Json
 pub fn create_router(storage: Arc<dyn StorageBackend>, http_config: &HTTPConfig) -> Router {
     let state = Arc::new(ApiState { storage });
 
+    // Create health router
+    let health_router = Router::new()
+        .route("/ready", get(health_check))
+        .route("/live", get(health_check))
+        .with_state(state.clone());
+
+    // Create events router
+    let events_router = Router::new()
+        .route("/", get(get_events))
+        .with_state(state.clone());
+
+    // Create swaps router
+    let swaps_router = Router::new()
+        .route("/{intent_hash}", get(get_swap_by_intent_hash))
+        .with_state(state.clone());
+
+    // Main router with nested routes
     let mut router = Router::new()
-        .route("/events", get(get_events))
-        .route("/health", get(health_check))
+        .nest("/health", health_router)
+        .nest("/events", events_router)
+        .nest("/swaps", swaps_router)
         .layer(CorsLayer::permissive())
         .with_state(state);
 

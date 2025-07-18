@@ -1,16 +1,13 @@
 use crate::receipt_processor::ReceiptProcessor;
-use crate::storage::StorageBackend;
 use crate::retry::{is_network_error, with_retry};
+use crate::storage::StorageBackend;
 use futures::StreamExt;
 use near_lake_framework::LakeConfig;
-use near_lake_framework::near_indexer_primitives::{
-    StreamerMessage,
-};
+use near_lake_framework::near_indexer_primitives::StreamerMessage;
 use std::collections::HashMap;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
-
 
 pub struct EventHandler {
     storage: Box<dyn StorageBackend>,
@@ -130,5 +127,4 @@ impl EventHandler {
             }
         }
     }
-
 }

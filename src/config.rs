@@ -58,7 +58,7 @@ impl AppConfig {
                         "HTTP_PREFIX" => "http.prefix".into(),
                         _ => k.as_str().into(),
                     })
-                    .split(".")
+                    .split("."),
             )
             .merge(Env::prefixed("APP__").split("__"))
             .extract()?;

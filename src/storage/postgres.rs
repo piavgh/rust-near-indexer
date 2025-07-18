@@ -291,7 +291,7 @@ impl StorageBackend for PostgresDatabase {
         offset: u32,
     ) -> Result<(Vec<EventRow>, u32), Box<dyn std::error::Error + Send + Sync>> {
         let client = self.pool.get().await?;
-        
+
         let mut query = "SELECT 
             block_height,
             block_timestamp,
@@ -307,12 +307,13 @@ impl StorageBackend for PostgresDatabase {
             related_receipt_receiver_id,
             related_receipt_predecessor_id,
             tx_hash
-        FROM events".to_string();
-        
+        FROM events"
+            .to_string();
+
         let mut count_query = "SELECT count(*) FROM events".to_string();
         let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
         let mut count_params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
-        
+
         if let Some(tx_hash) = &tx_hash {
             let where_clause = " WHERE tx_hash = $1";
             query.push_str(where_clause);
@@ -320,12 +321,16 @@ impl StorageBackend for PostgresDatabase {
             params.push(tx_hash);
             count_params.push(tx_hash);
         }
-        
+
         query.push_str(" ORDER BY block_height DESC, index_in_log DESC");
-        
+
         let param_offset = if tx_hash.is_some() { 2 } else { 1 };
-        query.push_str(&format!(" LIMIT ${} OFFSET ${}", param_offset, param_offset + 1));
-        
+        query.push_str(&format!(
+            " LIMIT ${} OFFSET ${}",
+            param_offset,
+            param_offset + 1
+        ));
+
         let limit_i64 = limit as i64;
         let offset_i64 = offset as i64;
         params.push(&limit_i64);
@@ -335,12 +340,15 @@ impl StorageBackend for PostgresDatabase {
         let count_future = client.query_one(&count_query, &count_params);
 
         let (events_result, count_result) = tokio::try_join!(events_future, count_future)?;
-        
+
         let events: Vec<EventRow> = events_result
             .into_iter()
             .map(|row| EventRow {
                 block_height: row.get::<_, i64>(0) as u64,
-                block_timestamp: row.get::<_, DateTime<Utc>>(1).timestamp_nanos_opt().unwrap_or(0) as u64,
+                block_timestamp: row
+                    .get::<_, DateTime<Utc>>(1)
+                    .timestamp_nanos_opt()
+                    .unwrap_or(0) as u64,
                 block_hash: row.get(2),
                 contract_id: row.get(3),
                 execution_status: row.get(4),
@@ -358,5 +366,40 @@ impl StorageBackend for PostgresDatabase {
 
         let total_count: i64 = count_result.get(0);
         Ok((events, total_count as u32))
+    }
+
+    async fn get_swap_by_intent_hash(
+        &self,
+        intent_hash: &str,
+    ) -> Result<Option<SwapRow>, Box<dyn std::error::Error + Send + Sync>> {
+        let client = self.pool.get().await?;
+
+        let query = "SELECT 
+            intent_hash, 
+            origin_asset, 
+            destination_asset, 
+            amount_in, 
+            amount_out, 
+            recipient, 
+            tx_hash 
+        FROM swaps 
+        WHERE intent_hash = $1";
+
+        let rows = client.query(query, &[&intent_hash]).await?;
+
+        if rows.is_empty() {
+            return Ok(None);
+        }
+
+        let row = &rows[0];
+        Ok(Some(SwapRow {
+            intent_hash: row.get(0),
+            origin_asset: row.get(1),
+            destination_asset: row.get(2),
+            amount_in: row.get(3),
+            amount_out: row.get(4),
+            recipient: row.get(5),
+            tx_hash: row.get(6),
+        }))
     }
 }

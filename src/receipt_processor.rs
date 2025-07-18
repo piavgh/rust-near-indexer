@@ -35,9 +35,11 @@ impl SwapData {
             && self.amount_out.is_some()
             && self.recipient.is_some()
     }
-    
+
     fn calculate_final_amount_in(&self) -> String {
-        if let (Some(amount_in_partial), Some(affiliate_fee)) = (&self.amount_in_partial, &self.affiliate_fee) {
+        if let (Some(amount_in_partial), Some(affiliate_fee)) =
+            (&self.amount_in_partial, &self.affiliate_fee)
+        {
             // Parse both values as u128 and add them
             let partial = amount_in_partial.parse::<u128>().unwrap_or(0);
             let fee = affiliate_fee.parse::<u128>().unwrap_or(0);
@@ -121,42 +123,59 @@ impl ReceiptProcessor {
         let logs = &outcome.execution_outcome.outcome.logs;
         let mut events = Vec::new();
         let mut swaps = Vec::new();
-        
+
         // First, scan through all logs to find token_diff events with referral
         let mut swap_data_candidates: Vec<SwapData> = Vec::new();
-        
+
         for log in logs.iter() {
             let log_trimmed = log.trim();
             if log_trimmed.starts_with(EVENT_JSON_PREFIX) {
-                if let Ok(event_json) = from_str::<serde_json::Value>(&log_trimmed[EVENT_JSON_PREFIX.len()..]) {
+                if let Ok(event_json) =
+                    from_str::<serde_json::Value>(&log_trimmed[EVENT_JSON_PREFIX.len()..])
+                {
                     if event_json.get("event").and_then(|e| e.as_str()) == Some("token_diff") {
-                        if let Some(data_array) = event_json.get("data").and_then(|d| d.as_array()) {
+                        if let Some(data_array) = event_json.get("data").and_then(|d| d.as_array())
+                        {
                             if let Some(first_data) = data_array.get(0) {
                                 // Check for referral field
-                                if first_data.get("referral").and_then(|r| r.as_str()) == Some("1click-kyberswap") {
+                                if first_data.get("referral").and_then(|r| r.as_str())
+                                    == Some("1click-kyberswap")
+                                {
                                     let mut swap_data = SwapData::default();
-                                    
+
                                     // Extract account_id
-                                    swap_data.account_id = first_data.get("account_id").and_then(|a| a.as_str()).map(|s| s.to_string());
-                                    
+                                    swap_data.account_id = first_data
+                                        .get("account_id")
+                                        .and_then(|a| a.as_str())
+                                        .map(|s| s.to_string());
+
                                     // Extract intent_hash
-                                    swap_data.intent_hash = first_data.get("intent_hash").and_then(|h| h.as_str()).map(|s| s.to_string());
-                                    
+                                    swap_data.intent_hash = first_data
+                                        .get("intent_hash")
+                                        .and_then(|h| h.as_str())
+                                        .map(|s| s.to_string());
+
                                     // Extract positive and negative values from diff
-                                    if let Some(diff) = first_data.get("diff").and_then(|d| d.as_object()) {
+                                    if let Some(diff) =
+                                        first_data.get("diff").and_then(|d| d.as_object())
+                                    {
                                         for (token, value) in diff {
                                             if let Some(val_str) = value.as_str() {
                                                 if val_str.starts_with('-') {
                                                     swap_data.origin_asset = Some(token.clone());
-                                                    swap_data.amount_in_partial = Some(val_str.trim_start_matches('-').to_string());
+                                                    swap_data.amount_in_partial = Some(
+                                                        val_str.trim_start_matches('-').to_string(),
+                                                    );
                                                 } else {
-                                                    swap_data.destination_asset = Some(token.clone());
-                                                    swap_data.amount_out = Some(val_str.to_string());
+                                                    swap_data.destination_asset =
+                                                        Some(token.clone());
+                                                    swap_data.amount_out =
+                                                        Some(val_str.to_string());
                                                 }
                                             }
                                         }
                                     }
-                                    
+
                                     swap_data_candidates.push(swap_data);
                                 }
                             }
@@ -165,32 +184,41 @@ impl ReceiptProcessor {
                 }
             }
         }
-        
+
         // Now look for matching transfer events for each swap candidate
         for mut swap_data in swap_data_candidates {
             if swap_data.account_id.is_none() {
                 continue;
             }
-            
+
             // Scan through all logs to find matching transfer and ft_withdraw events
             for log in logs.iter() {
                 let log_trimmed = log.trim();
                 if log_trimmed.starts_with(EVENT_JSON_PREFIX) {
-                    if let Ok(event_json) = from_str::<serde_json::Value>(&log_trimmed[EVENT_JSON_PREFIX.len()..]) {
+                    if let Ok(event_json) =
+                        from_str::<serde_json::Value>(&log_trimmed[EVENT_JSON_PREFIX.len()..])
+                    {
                         let event_type = event_json.get("event").and_then(|e| e.as_str());
-                        
+
                         // Look for transfer event to get affiliate fee
                         if event_type == Some("transfer") {
-                            if let Some(data_array) = event_json.get("data").and_then(|d| d.as_array()) {
+                            if let Some(data_array) =
+                                event_json.get("data").and_then(|d| d.as_array())
+                            {
                                 if let Some(first_data) = data_array.get(0) {
                                     // Check if account_id matches
-                                    if first_data.get("account_id").and_then(|a| a.as_str()) == swap_data.account_id.as_deref() {
+                                    if first_data.get("account_id").and_then(|a| a.as_str())
+                                        == swap_data.account_id.as_deref()
+                                    {
                                         // Extract affiliate fee from tokens
-                                        if let Some(tokens) = first_data.get("tokens").and_then(|t| t.as_object()) {
+                                        if let Some(tokens) =
+                                            first_data.get("tokens").and_then(|t| t.as_object())
+                                        {
                                             // Get the first token value (should be the affiliate fee)
                                             if let Some((_, value)) = tokens.iter().next() {
                                                 if let Some(fee_str) = value.as_str() {
-                                                    swap_data.affiliate_fee = Some(fee_str.to_string());
+                                                    swap_data.affiliate_fee =
+                                                        Some(fee_str.to_string());
                                                 }
                                             }
                                         }
@@ -198,17 +226,26 @@ impl ReceiptProcessor {
                                 }
                             }
                         }
-                        
+
                         // Look for ft_withdraw event to get recipient
                         if event_type == Some("ft_withdraw") {
-                            if let Some(data_array) = event_json.get("data").and_then(|d| d.as_array()) {
+                            if let Some(data_array) =
+                                event_json.get("data").and_then(|d| d.as_array())
+                            {
                                 if let Some(first_data) = data_array.get(0) {
                                     // Check if account_id matches
-                                    if first_data.get("account_id").and_then(|a| a.as_str()) == swap_data.account_id.as_deref() {
+                                    if first_data.get("account_id").and_then(|a| a.as_str())
+                                        == swap_data.account_id.as_deref()
+                                    {
                                         // Extract recipient from memo field
-                                        if let Some(memo) = first_data.get("memo").and_then(|m| m.as_str()) {
-                                            if let Some(recipient_part) = memo.strip_prefix("WITHDRAW_TO:") {
-                                                swap_data.recipient = Some(recipient_part.to_string());
+                                        if let Some(memo) =
+                                            first_data.get("memo").and_then(|m| m.as_str())
+                                        {
+                                            if let Some(recipient_part) =
+                                                memo.strip_prefix("WITHDRAW_TO:")
+                                            {
+                                                swap_data.recipient =
+                                                    Some(recipient_part.to_string());
                                             }
                                         }
                                     }
@@ -218,12 +255,12 @@ impl ReceiptProcessor {
                     }
                 }
             }
-            
+
             // Create swap record if we have all required data
             if swap_data.is_complete() {
                 // Calculate amount_in before consuming swap_data
                 let amount_in = swap_data.calculate_final_amount_in();
-                
+
                 swaps.push(SwapRow {
                     intent_hash: swap_data.intent_hash.unwrap_or_default(),
                     origin_asset: swap_data.origin_asset.unwrap_or_default(),
@@ -235,20 +272,16 @@ impl ReceiptProcessor {
                 });
             }
         }
-        
+
         // Process all logs and create events
         for (index_in_log, log) in logs.iter().enumerate() {
-            if let Some(event_row) = self.parse_event(
-                index_in_log,
-                log,
-                tx_hash.clone(),
-                outcome,
-                header
-            ) {
+            if let Some(event_row) =
+                self.parse_event(index_in_log, log, tx_hash.clone(), outcome, header)
+            {
                 events.push(event_row);
             }
         }
-        
+
         (events, swaps)
     }
 
