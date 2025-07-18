@@ -19,6 +19,17 @@ pub struct EventRow {
     pub tx_hash: Option<String>,
 }
 
+#[derive(Serialize, Debug)]
+pub struct SwapRow {
+    pub intent_hash: String,
+    pub origin_asset: String,
+    pub destination_asset: String,
+    pub amount_in: String,
+    pub amount_out: String,
+    pub recipient: String,
+    pub tx_hash: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct EventJson {
     pub version: String,

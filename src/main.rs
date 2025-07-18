@@ -2,6 +2,7 @@ mod api;
 mod cache;
 mod config;
 mod event_handler;
+mod receipt_processor;
 mod retry;
 mod shutdown_coordinator;
 mod storage;
@@ -11,6 +12,7 @@ use crate::cache::receipts_cache::ReceiptsCache;
 use crate::cache::{CACHE_EXPIRATION_BLOCKS, CACHE_SIZE};
 use crate::config::{AppConfig, init_tracing};
 use crate::event_handler::EventHandler;
+use crate::receipt_processor::ReceiptProcessor;
 use crate::shutdown_coordinator::ShutdownCoordinator;
 use crate::storage::StorageBackend;
 use crate::storage::clickhouse::ClickhouseDatabase;
@@ -213,7 +215,8 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
             }
         };
 
-        let event_handler = EventHandler::new(storage, receipts_cache);
+        let receipt_processor = ReceiptProcessor::new(receipts_cache);
+        let event_handler = EventHandler::new(storage, receipt_processor);
 
         let stream_handler_token = shutdown_coordinator.token.clone();
         shutdown_coordinator.tracker.spawn(async move {

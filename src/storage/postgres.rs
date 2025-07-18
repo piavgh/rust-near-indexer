@@ -1,6 +1,6 @@
 use crate::retry::{is_network_error, with_retry};
 use crate::storage::StorageBackend;
-use crate::types::EventRow;
+use crate::types::{EventRow, SwapRow};
 use chrono::{DateTime, Utc};
 use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod};
 use serde::Deserialize;
@@ -169,6 +169,70 @@ impl PostgresDatabase {
         }
         Ok(())
     }
+
+    async fn insert_swaps_internal(
+        &self,
+        swaps: &[SwapRow],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if swaps.is_empty() {
+            return Ok(());
+        }
+
+        let client = self.pool.get().await?;
+
+        // Use batch insert with multiple rows
+        for chunk in swaps.chunks(100) {
+            // Process in chunks to avoid too many parameters
+            let mut query = String::from(
+                "INSERT INTO swaps (
+                intent_hash, origin_asset, destination_asset, amount_in, amount_out, recipient, tx_hash
+            ) VALUES ",
+            );
+
+            let values_parts: Vec<String> = (0..chunk.len())
+                .map(|i| {
+                    let base = i * 7 + 1;
+                    format!(
+                        "(${}, ${}, ${}, ${}, ${}, ${}, ${})",
+                        base,
+                        base + 1,
+                        base + 2,
+                        base + 3,
+                        base + 4,
+                        base + 5,
+                        base + 6
+                    )
+                })
+                .collect();
+
+            query.push_str(&values_parts.join(", "));
+            query.push_str(
+                " ON CONFLICT (intent_hash) DO UPDATE SET
+                origin_asset = EXCLUDED.origin_asset,
+                destination_asset = EXCLUDED.destination_asset,
+                amount_in = EXCLUDED.amount_in,
+                amount_out = EXCLUDED.amount_out,
+                recipient = EXCLUDED.recipient,
+                tx_hash = EXCLUDED.tx_hash",
+            );
+
+            // Create parameters vector
+            let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+
+            for row in chunk {
+                params.push(&row.intent_hash);
+                params.push(&row.origin_asset);
+                params.push(&row.destination_asset);
+                params.push(&row.amount_in);
+                params.push(&row.amount_out);
+                params.push(&row.recipient);
+                params.push(&row.tx_hash);
+            }
+
+            client.execute(&query, &params).await?;
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -201,6 +265,21 @@ impl StorageBackend for PostgresDatabase {
             5,
             |e| is_network_error(&e.to_string()),
             "postgres insert",
+        )
+        .await
+    }
+
+    async fn insert_swaps(
+        &self,
+        swaps: &[SwapRow],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let swaps_ref = swaps;
+
+        with_retry(
+            || async { self.insert_swaps_internal(swaps_ref).await },
+            5,
+            |e| is_network_error(&e.to_string()),
+            "postgres insert swaps",
         )
         .await
     }

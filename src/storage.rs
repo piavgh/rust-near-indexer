@@ -3,7 +3,7 @@ pub mod postgres;
 
 use crate::storage::clickhouse::ClickhouseConfig;
 use crate::storage::postgres::PostgresConfig;
-use crate::types::EventRow;
+use crate::types::{EventRow, SwapRow};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -26,6 +26,12 @@ pub trait StorageBackend: Send + Sync {
     async fn insert_rows(
         &self,
         rows: &[EventRow],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Insert swap rows into the database
+    async fn insert_swaps(
+        &self,
+        swaps: &[SwapRow],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Get events from the database with optional tx_hash filter

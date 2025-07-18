@@ -1,6 +1,6 @@
 use crate::storage::StorageBackend;
 use crate::retry::{is_network_error, with_retry};
-use crate::types::EventRow;
+use crate::types::{EventRow, SwapRow};
 use clickhouse::{Client, Row};
 use serde::Deserialize;
 use tracing::info;
@@ -56,6 +56,31 @@ impl From<&EventRow> for ClickhouseEventRow {
     }
 }
 
+#[derive(Row, serde::Serialize, serde::Deserialize)]
+struct ClickhouseSwapRow {
+    intent_hash: String,
+    origin_asset: String,
+    destination_asset: String,
+    amount_in: String,
+    amount_out: String,
+    recipient: String,
+    tx_hash: Option<String>,
+}
+
+impl From<&SwapRow> for ClickhouseSwapRow {
+    fn from(swap_row: &SwapRow) -> Self {
+        ClickhouseSwapRow {
+            intent_hash: swap_row.intent_hash.clone(),
+            origin_asset: swap_row.origin_asset.clone(),
+            destination_asset: swap_row.destination_asset.clone(),
+            amount_in: swap_row.amount_in.clone(),
+            amount_out: swap_row.amount_out.clone(),
+            recipient: swap_row.recipient.clone(),
+            tx_hash: swap_row.tx_hash.clone(),
+        }
+    }
+}
+
 impl ClickhouseDatabase {
     pub fn new(url: &str, user: &str, password: &str, database: &str) -> ClickhouseDatabase {
         let client = Client::default()
@@ -77,6 +102,18 @@ impl ClickhouseDatabase {
         let mut insert = self.client.insert("events")?;
         for row in rows {
             insert.write(row).await?;
+        }
+        insert.end().await?;
+        Ok(())
+    }
+
+    async fn insert_swaps_internal(
+        &self,
+        swaps: &[ClickhouseSwapRow],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut insert = self.client.insert("swaps")?;
+        for swap in swaps {
+            insert.write(swap).await?;
         }
         insert.end().await?;
         Ok(())
@@ -129,6 +166,22 @@ impl StorageBackend for ClickhouseDatabase {
             5,
             |e| is_network_error(&e.to_string()),
             "clickhouse insert",
+        )
+        .await
+    }
+
+    async fn insert_swaps(
+        &self,
+        swaps: &[SwapRow],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Convert SwapRow to ClickhouseSwapRow
+        let clickhouse_swaps: Vec<ClickhouseSwapRow> = swaps.iter().map(|swap| swap.into()).collect();
+
+        with_retry(
+            || async { self.insert_swaps_internal(&clickhouse_swaps).await },
+            5,
+            |e| is_network_error(&e.to_string()),
+            "clickhouse insert swaps",
         )
         .await
     }
