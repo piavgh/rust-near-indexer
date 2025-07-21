@@ -1,6 +1,7 @@
 mod api;
 mod cache;
 mod config;
+mod data_source;
 mod event_handler;
 mod receipt_processor;
 mod retry;
@@ -19,7 +20,6 @@ use crate::storage::clickhouse::ClickhouseDatabase;
 use crate::storage::postgres::PostgresDatabase;
 use clap::Parser;
 use dotenvy::dotenv;
-use near_lake_framework::LakeConfigBuilder;
 use redis::cmd;
 use std::env;
 use std::sync::Arc;
@@ -172,14 +172,20 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
 
         info!("Starting indexer at block height: {}", start_block);
 
-        let lake_config = match LakeConfigBuilder::default()
-            .mainnet()
-            .start_block_height(start_block)
-            .build()
+        let stream_handler_token = shutdown_coordinator.token.clone();
+
+        // Create stream from configured data source
+        let stream = match data_source::create_stream(
+            &config.indexer.data_source,
+            start_block,
+            stream_handler_token.clone(),
+            &shutdown_coordinator.tracker,
+        )
+        .await
         {
-            Ok(config) => config,
+            Ok(stream) => stream,
             Err(e) => {
-                return Err(format!("Failed to create NEAR Lake Framework config: {}", e).into());
+                return Err(format!("Failed to create data source stream: {}", e).into());
             }
         };
 
@@ -218,10 +224,9 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
         let receipt_processor = ReceiptProcessor::new(receipts_cache);
         let event_handler = EventHandler::new(storage, receipt_processor);
 
-        let stream_handler_token = shutdown_coordinator.token.clone();
         shutdown_coordinator.tracker.spawn(async move {
             event_handler
-                .handle_stream(lake_config, stream_handler_token)
+                .handle_stream(stream, stream_handler_token)
                 .await;
         });
     }

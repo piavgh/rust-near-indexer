@@ -2,7 +2,6 @@ use crate::receipt_processor::ReceiptProcessor;
 use crate::retry::{is_network_error, with_retry};
 use crate::storage::StorageBackend;
 use futures::StreamExt;
-use near_lake_framework::LakeConfig;
 use near_lake_framework::near_indexer_primitives::StreamerMessage;
 use std::collections::HashMap;
 use tokio_stream::wrappers::ReceiverStream;
@@ -22,11 +21,13 @@ impl EventHandler {
         }
     }
 
-    pub async fn handle_stream(&self, config: LakeConfig, shutdown_token: CancellationToken) {
+    pub async fn handle_stream(
+        &self,
+        stream: ReceiverStream<StreamerMessage>,
+        shutdown_token: CancellationToken,
+    ) {
         info!("Starting stream processing...");
-
-        let (_, stream) = near_lake_framework::streamer(config);
-        let mut stream = ReceiverStream::new(stream);
+        let mut stream = stream;
 
         loop {
             tokio::select! {

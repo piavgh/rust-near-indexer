@@ -8,6 +8,15 @@ http:
 indexer:
   enabled: true
   block_height: 151592216
+  data_source:
+    source_type: "neardata_api"
+    neardata_api:
+      base_url: "https://mainnet.neardata.xyz"
+      timeout_seconds: 30
+      max_requests_per_second: 8.0
+      poll_interval_ms: 200
+      cache_size: 1000
+      max_retries: 3
 
 shutdown:
   shutdown_timeout: 20s

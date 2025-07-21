@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::env;
 use tracing::info;
 
+use crate::data_source::DataSourceConfig;
 use crate::shutdown_coordinator::ShutdownConfig;
 use crate::storage::StorageConfig;
 
@@ -20,6 +21,7 @@ pub struct AppConfig {
 pub struct IndexerConfig {
     pub enabled: bool,
     pub block_height: u64,
+    pub data_source: DataSourceConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
