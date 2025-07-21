@@ -3,6 +3,7 @@ use crate::storage::StorageBackend;
 use crate::types::{EventRow, SwapRow};
 use chrono::{DateTime, Utc};
 use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio_postgres::NoTls;
 use tracing::error;
@@ -216,7 +217,7 @@ impl PostgresDatabase {
                 tx_hash = EXCLUDED.tx_hash",
             );
 
-            // Create parameters vector
+            // Create parameters vector - amounts are already Decimal types
             let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
 
             for row in chunk {
@@ -396,8 +397,8 @@ impl StorageBackend for PostgresDatabase {
             intent_hash: row.get(0),
             origin_asset: row.get(1),
             destination_asset: row.get(2),
-            amount_in: row.get(3),
-            amount_out: row.get(4),
+            amount_in: row.get::<_, Decimal>(3),
+            amount_out: row.get::<_, Decimal>(4),
             recipient: row.get(5),
             tx_hash: row.get(6),
         }))

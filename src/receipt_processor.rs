@@ -7,9 +7,11 @@ use near_lake_framework::near_indexer_primitives::{
     IndexerExecutionOutcomeWithReceipt, StreamerMessage, views::BlockHeaderView,
     views::ExecutionStatusView, views::ReceiptEnumView,
 };
+use rust_decimal::Decimal;
 use serde_json::from_str;
 use std::collections::HashMap;
-use tracing::info;
+use std::str::FromStr;
+use tracing::{info, warn};
 
 const TRACKING_CONTRACT: &str = "intents.near";
 const EVENT_JSON_PREFIX: &str = "EVENT_JSON:";
@@ -259,14 +261,25 @@ impl ReceiptProcessor {
             // Create swap record if we have all required data
             if swap_data.is_complete() {
                 // Calculate amount_in before consuming swap_data
-                let amount_in = swap_data.calculate_final_amount_in();
+                let amount_in_str = swap_data.calculate_final_amount_in();
+                let amount_out_str = swap_data.amount_out.unwrap_or_default();
+
+                // Parse amounts as Decimal, fallback to 0 if parsing fails
+                let amount_in_decimal = Decimal::from_str(&amount_in_str).unwrap_or_else(|_| {
+                    warn!("Failed to parse amount_in '{}', using 0", amount_in_str);
+                    Decimal::ZERO
+                });
+                let amount_out_decimal = Decimal::from_str(&amount_out_str).unwrap_or_else(|_| {
+                    warn!("Failed to parse amount_out '{}', using 0", amount_out_str);
+                    Decimal::ZERO
+                });
 
                 swaps.push(SwapRow {
                     intent_hash: swap_data.intent_hash.unwrap_or_default(),
                     origin_asset: swap_data.origin_asset.unwrap_or_default(),
                     destination_asset: swap_data.destination_asset.unwrap_or_default(),
-                    amount_in,
-                    amount_out: swap_data.amount_out.unwrap_or_default(),
+                    amount_in: amount_in_decimal,
+                    amount_out: amount_out_decimal,
                     recipient: swap_data.recipient.unwrap_or_default(),
                     tx_hash: Some(tx_hash.clone()),
                 });

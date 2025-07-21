@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -24,8 +25,8 @@ pub struct SwapRow {
     pub intent_hash: String,
     pub origin_asset: String,
     pub destination_asset: String,
-    pub amount_in: String,
-    pub amount_out: String,
+    pub amount_in: Decimal,
+    pub amount_out: Decimal,
     pub recipient: String,
     pub tx_hash: Option<String>,
 }

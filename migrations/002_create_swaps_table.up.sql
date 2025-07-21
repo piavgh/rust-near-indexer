@@ -1,16 +1,13 @@
 -- Create the swaps table
 CREATE TABLE IF NOT EXISTS swaps
 (
-    intent_hash         VARCHAR(64) NOT NULL,
+    intent_hash         TEXT PRIMARY KEY,
     origin_asset        TEXT NOT NULL,
     destination_asset   TEXT NOT NULL,
-    amount_in           TEXT NOT NULL,
-    amount_out          TEXT NOT NULL,
+    amount_in           NUMERIC NOT NULL,
+    amount_out          NUMERIC NOT NULL,
     recipient           TEXT NOT NULL,
-    tx_hash             TEXT,
-    
-    -- Primary key
-    PRIMARY KEY (intent_hash)
+    tx_hash             TEXT
 );
 
 -- Create indexes for performance optimization

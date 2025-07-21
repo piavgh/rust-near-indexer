@@ -2,6 +2,7 @@ use crate::retry::{is_network_error, with_retry};
 use crate::storage::StorageBackend;
 use crate::types::{EventRow, SwapRow};
 use clickhouse::{Client, Row};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use tracing::info;
 
@@ -61,8 +62,8 @@ struct ClickhouseSwapRow {
     intent_hash: String,
     origin_asset: String,
     destination_asset: String,
-    amount_in: String,
-    amount_out: String,
+    amount_in: Decimal,
+    amount_out: Decimal,
     recipient: String,
     tx_hash: Option<String>,
 }
@@ -73,8 +74,8 @@ impl From<&SwapRow> for ClickhouseSwapRow {
             intent_hash: swap_row.intent_hash.clone(),
             origin_asset: swap_row.origin_asset.clone(),
             destination_asset: swap_row.destination_asset.clone(),
-            amount_in: swap_row.amount_in.clone(),
-            amount_out: swap_row.amount_out.clone(),
+            amount_in: swap_row.amount_in,
+            amount_out: swap_row.amount_out,
             recipient: swap_row.recipient.clone(),
             tx_hash: swap_row.tx_hash.clone(),
         }
@@ -283,8 +284,8 @@ impl StorageBackend for ClickhouseDatabase {
             intent_hash: row.intent_hash.clone(),
             origin_asset: row.origin_asset.clone(),
             destination_asset: row.destination_asset.clone(),
-            amount_in: row.amount_in.clone(),
-            amount_out: row.amount_out.clone(),
+            amount_in: row.amount_in,
+            amount_out: row.amount_out,
             recipient: row.recipient.clone(),
             tx_hash: row.tx_hash.clone(),
         }))
