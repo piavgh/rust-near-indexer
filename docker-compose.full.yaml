@@ -11,10 +11,9 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
-      - ./docker/clickhouse/init:/docker-entrypoint-initdb.d
       - ./docker/clickhouse/users.d:/etc/clickhouse-server/users.d
     healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      test: [ "CMD", "clickhouse-client", "--query", "SELECT 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,7 +32,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
       interval: 30s
       timeout: 3s
       retries: 5
@@ -102,6 +101,7 @@ volumes:
   clickhouse_data:
   clickhouse_logs:
   redis_data:
+  postgres_data:
 
 networks:
   indexer-network:

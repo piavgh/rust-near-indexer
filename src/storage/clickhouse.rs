@@ -1,10 +1,13 @@
+use crate::decimal_utils::{decimal_to_u128, u128_to_decimal};
 use crate::retry::{is_network_error, with_retry};
 use crate::storage::StorageBackend;
 use crate::types::{EventRow, SwapRow};
 use clickhouse::{Client, Row};
-use rust_decimal::Decimal;
+
 use serde::Deserialize;
-use tracing::info;
+use std::fs;
+use std::path::Path;
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClickhouseConfig {
@@ -62,8 +65,8 @@ struct ClickhouseSwapRow {
     intent_hash: String,
     origin_asset: String,
     destination_asset: String,
-    amount_in: Decimal,
-    amount_out: Decimal,
+    amount_in: u128,
+    amount_out: u128,
     recipient: String,
     tx_hash: Option<String>,
 }
@@ -74,8 +77,8 @@ impl From<&SwapRow> for ClickhouseSwapRow {
             intent_hash: swap_row.intent_hash.clone(),
             origin_asset: swap_row.origin_asset.clone(),
             destination_asset: swap_row.destination_asset.clone(),
-            amount_in: swap_row.amount_in,
-            amount_out: swap_row.amount_out,
+            amount_in: decimal_to_u128(swap_row.amount_in),
+            amount_out: decimal_to_u128(swap_row.amount_out),
             recipient: swap_row.recipient.clone(),
             tx_hash: swap_row.tx_hash.clone(),
         }
@@ -94,6 +97,112 @@ impl ClickhouseDatabase {
             .with_option("send_timeout", "30");
 
         ClickhouseDatabase { client }
+    }
+
+    pub async fn run_migrations(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        info!("Running ClickHouse database migrations...");
+
+        // Create migrations tracking table
+        self.create_migrations_table().await?;
+
+        let migrations_dir = Path::new("migrations/clickhouse");
+        if !migrations_dir.exists() {
+            warn!(
+                "ClickHouse migrations directory not found: {:?}",
+                migrations_dir
+            );
+            return Ok(());
+        }
+
+        // Read all migration files
+        let mut migration_files: Vec<_> = fs::read_dir(migrations_dir)?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let file_name = entry.file_name();
+                let file_name_str = file_name.to_str()?;
+                if file_name_str.ends_with(".up.sql") {
+                    Some((file_name_str.to_string(), entry.path()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort migrations by filename to ensure correct order
+        migration_files.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (filename, path) in migration_files {
+            let migration_name = filename.replace(".up.sql", "");
+
+            // Check if migration has already been applied
+            if self.is_migration_applied(&migration_name).await? {
+                info!("Migration {} already applied, skipping", migration_name);
+                continue;
+            }
+
+            info!("Applying migration: {}", migration_name);
+
+            // Read and execute migration
+            let migration_sql = fs::read_to_string(&path)?;
+            self.execute_migration_sql(&migration_sql).await?;
+
+            // Record migration as applied
+            self.record_migration(&migration_name).await?;
+
+            info!("Migration {} applied successfully", migration_name);
+        }
+
+        info!("ClickHouse database migrations completed successfully");
+        Ok(())
+    }
+
+    async fn create_migrations_table(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let create_table_sql = r#"
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_name String NOT NULL,
+                applied_at DateTime64(3) DEFAULT now64(3)
+            ) ENGINE = MergeTree()
+            ORDER BY migration_name
+        "#;
+
+        self.client.query(create_table_sql).execute().await?;
+        Ok(())
+    }
+
+    async fn is_migration_applied(
+        &self,
+        migration_name: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let query = format!(
+            "SELECT count(*) FROM schema_migrations WHERE migration_name = '{}'",
+            migration_name
+        );
+
+        let count: u64 = self.client.query(&query).fetch_one().await?;
+        Ok(count > 0)
+    }
+
+    async fn execute_migration_sql(
+        &self,
+        sql: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.client.query(sql).execute().await?;
+        Ok(())
+    }
+
+    async fn record_migration(
+        &self,
+        migration_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let query = format!(
+            "INSERT INTO schema_migrations (migration_name) VALUES ('{}')",
+            migration_name
+        );
+
+        self.client.query(&query).execute().await?;
+        Ok(())
     }
 
     async fn insert_rows_internal(
@@ -284,8 +393,8 @@ impl StorageBackend for ClickhouseDatabase {
             intent_hash: row.intent_hash.clone(),
             origin_asset: row.origin_asset.clone(),
             destination_asset: row.destination_asset.clone(),
-            amount_in: row.amount_in,
-            amount_out: row.amount_out,
+            amount_in: u128_to_decimal(row.amount_in),
+            amount_out: u128_to_decimal(row.amount_out),
             recipient: row.recipient.clone(),
             tx_hash: row.tx_hash.clone(),
         }))

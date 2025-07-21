@@ -1,10 +1,4 @@
--- Create the database if it doesn't exist
-CREATE DATABASE IF NOT EXISTS mainnet;
-
--- Use the database
-USE mainnet;
-
--- Create the events table based on the README schema
+-- Create the events table based on the ClickHouse schema
 CREATE TABLE IF NOT EXISTS events
 (
     block_height                     UInt64 COMMENT 'The height of the block',

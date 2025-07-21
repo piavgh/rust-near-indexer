@@ -2,6 +2,7 @@ mod api;
 mod cache;
 mod config;
 mod data_source;
+mod decimal_utils;
 mod event_handler;
 mod receipt_processor;
 mod retry;
@@ -118,6 +119,11 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
             let database = &config.storage.clickhouse.database;
 
             let clickhouse_db = ClickhouseDatabase::new(url, user, password, database);
+
+            // Run database migrations
+            info!("Running database migrations...");
+            clickhouse_db.run_migrations().await?;
+            info!("Database migrations completed successfully");
 
             Box::new(clickhouse_db)
         }
@@ -295,6 +301,12 @@ async fn run_api(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Se
             let database = &config.storage.clickhouse.database;
 
             let clickhouse_db = ClickhouseDatabase::new(url, user, password, database);
+
+            // Run database migrations
+            info!("Running database migrations...");
+            clickhouse_db.run_migrations().await?;
+            info!("Database migrations completed successfully");
+
             Arc::new(clickhouse_db)
         }
     };
