@@ -1,11 +1,11 @@
 [package]
-name = "near-defuse-indexer"
+name = "near-intents-indexer"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85.0"
 
 [[bin]]
-name = "near-defuse-indexer"
+name = "near-intents-indexer"
 path = "src/main.rs"
 
 [dependencies]

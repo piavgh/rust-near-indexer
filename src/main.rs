@@ -95,7 +95,9 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
             // Run database migrations
             info!("Running database migrations...");
             let migration_pool = sqlx::PgPool::connect(connection_string).await?;
-            sqlx::migrate!("./migrations").run(&migration_pool).await?;
+            sqlx::migrate!("./migrations/postgres")
+                .run(&migration_pool)
+                .await?;
             info!("Database migrations completed successfully");
 
             let postgres_database = PostgresDatabase::new(connection_string)

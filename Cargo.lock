@@ -2552,7 +2552,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "near-defuse-indexer"
+name = "near-fmt"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64c0e4d846b9c27b30e5f24e788fb8cc55c046f72e2048e2539dbcb04d9a71c4"
+dependencies = [
+ "near-primitives-core",
+]
+
+[[package]]
+name = "near-indexer-primitives"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0610b44393dbbed33e3919de47d12fccc3379dd30ae0614a71c30d32531327a"
+dependencies = [
+ "near-primitives",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "near-intents-indexer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2587,26 +2607,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
-]
-
-[[package]]
-name = "near-fmt"
-version = "0.30.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64c0e4d846b9c27b30e5f24e788fb8cc55c046f72e2048e2539dbcb04d9a71c4"
-dependencies = [
- "near-primitives-core",
-]
-
-[[package]]
-name = "near-indexer-primitives"
-version = "0.30.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0610b44393dbbed33e3919de47d12fccc3379dd30ae0614a71c30d32531327a"
-dependencies = [
- "near-primitives",
- "serde",
- "serde_json",
 ]
 
 [[package]]
