@@ -4,17 +4,38 @@
 //! to fetch NEAR blockchain blocks sequentially and forwards them through a channel
 //! to create a stream interface compatible with NEAR Lake Framework.
 
-use near_lake_framework::near_indexer_primitives::StreamerMessage;
-use reqwest::Client;
 use std::error::Error;
 use std::fmt;
 use std::time::{Duration, Instant};
+
+use near_lake_framework::near_indexer_primitives::StreamerMessage;
+use reqwest::Client;
+use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::data_source::NearDataApiConfig;
+#[derive(Debug, Clone, Deserialize)]
+pub struct NearDataApiConfig {
+    pub base_url: String,
+    pub timeout_seconds: u64,
+    pub max_requests_per_second: f64,
+    pub poll_interval_ms: u64,
+    pub max_retries: u32,
+}
+
+impl Default for NearDataApiConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://mainnet.neardata.xyz".to_string(),
+            timeout_seconds: 30,
+            max_requests_per_second: 8.0, // Conservative to respect bandwidth limits
+            poll_interval_ms: 200,
+            max_retries: 3,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum NearDataApiError {

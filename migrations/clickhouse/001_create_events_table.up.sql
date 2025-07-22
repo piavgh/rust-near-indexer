@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS events
     INDEX            block_timestamp_minmax_idx block_timestamp TYPE minmax GRANULARITY 1,
     INDEX            contract_id_bloom_index contract_id TYPE bloom_filter() GRANULARITY 1,
     INDEX            related_receipt_id_bloom_index related_receipt_id TYPE bloom_filter() GRANULARITY 1,
-    INDEX            related_receipt_receiver_id_bloom_index related_receipt_receiver_id TYPE bloom_filter() GRANULARITY 1
+    INDEX            related_receipt_receiver_id_bloom_index related_receipt_receiver_id TYPE bloom_filter() GRANULARITY 1,
+    INDEX            tx_hash_bloom_index tx_hash TYPE bloom_filter() GRANULARITY 1
 ) ENGINE = ReplacingMergeTree
 PRIMARY KEY (block_height, related_receipt_id, index_in_log)
 ORDER BY (block_height, related_receipt_id, index_in_log); 

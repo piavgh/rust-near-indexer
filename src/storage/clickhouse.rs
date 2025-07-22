@@ -1,7 +1,8 @@
 use crate::decimal_utils::{decimal_to_u128, u128_to_decimal};
 use crate::retry::{is_network_error, with_retry};
 use crate::storage::StorageBackend;
-use crate::types::{EventRow, SwapRow};
+use crate::types::{Asset, EventRow, SwapRow};
+use chrono::{DateTime, Utc};
 use clickhouse::{Client, Row};
 
 use serde::Deserialize;
@@ -83,6 +84,45 @@ impl From<&SwapRow> for ClickhouseSwapRow {
             withdrawal_fee: decimal_to_u128(swap_row.withdrawal_fee),
             recipient: swap_row.recipient.clone(),
             tx_hash: swap_row.tx_hash.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Row, serde::Serialize, serde::Deserialize)]
+struct ClickhouseAssetRow {
+    defuse_asset_identifier: String,
+    near_token_id: String,
+    intents_token_id: String,
+    decimals: u8,
+    asset_name: String,
+    symbol: Option<String>,
+    min_deposit_amount: Option<String>,
+    min_withdrawal_amount: Option<String>,
+    withdrawal_fee: Option<String>,
+    standard: String,
+    blockchain: String,
+    price: Option<f64>,
+    price_updated_at: Option<String>,
+    contract_address: String,
+}
+
+impl From<&Asset> for ClickhouseAssetRow {
+    fn from(asset: &Asset) -> Self {
+        ClickhouseAssetRow {
+            defuse_asset_identifier: asset.defuse_asset_identifier.clone(),
+            near_token_id: asset.near_token_id.clone(),
+            intents_token_id: asset.intents_token_id.clone(),
+            decimals: asset.decimals,
+            asset_name: asset.asset_name.clone(),
+            symbol: asset.symbol.clone(),
+            min_deposit_amount: asset.min_deposit_amount.clone(),
+            min_withdrawal_amount: asset.min_withdrawal_amount.clone(),
+            withdrawal_fee: asset.withdrawal_fee.clone(),
+            standard: asset.standard.clone(),
+            blockchain: asset.blockchain.clone(),
+            price: asset.price,
+            price_updated_at: asset.price_updated_at.as_ref().map(|dt| dt.to_rfc3339()),
+            contract_address: asset.contract_address.clone(),
         }
     }
 }
@@ -228,6 +268,48 @@ impl ClickhouseDatabase {
             insert.write(swap).await?;
         }
         insert.end().await?;
+        Ok(())
+    }
+
+    async fn insert_assets_internal(
+        &self,
+        assets: &[ClickhouseAssetRow],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        tracing::info!("Inserting {} assets to ClickHouse", assets.len());
+
+        let mut insert = self.client.insert("assets")?;
+        for (index, asset) in assets.iter().enumerate() {
+            tracing::debug!(
+                "Asset {}: defuse_asset_identifier='{}', near_token_id='{}', intents_token_id='{}', decimals={}, asset_name='{}', symbol={:?}, min_deposit_amount={:?}, min_withdrawal_amount={:?}, withdrawal_fee={:?}, standard='{}', blockchain='{}', price={:?}, price_updated_at={:?}, contract_address='{}'",
+                index,
+                asset.defuse_asset_identifier,
+                asset.near_token_id,
+                asset.intents_token_id,
+                asset.decimals,
+                asset.asset_name,
+                asset.symbol,
+                asset.min_deposit_amount,
+                asset.min_withdrawal_amount,
+                asset.withdrawal_fee,
+                asset.standard,
+                asset.blockchain,
+                asset.price,
+                asset.price_updated_at,
+                asset.contract_address
+            );
+
+            match insert.write(asset).await {
+                Ok(()) => tracing::debug!("Successfully wrote asset {} to insert buffer", index),
+                Err(e) => {
+                    tracing::error!("Failed to write asset {} to insert buffer: {}", index, e);
+                    return Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
+                }
+            }
+        }
+
+        tracing::info!("Calling insert.end() for {} assets", assets.len());
+        insert.end().await?;
+        tracing::info!("Successfully completed asset insertion");
         Ok(())
     }
 }
@@ -402,5 +484,127 @@ impl StorageBackend for ClickhouseDatabase {
             recipient: row.recipient.clone(),
             tx_hash: row.tx_hash.clone(),
         }))
+    }
+
+    async fn insert_assets(
+        &self,
+        assets: &[Asset],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Convert Asset to ClickhouseAssetRow
+        let clickhouse_assets: Vec<ClickhouseAssetRow> =
+            assets.iter().map(|asset| asset.into()).collect();
+
+        // First try bulk insert
+        let bulk_result = with_retry(
+            || async { self.insert_assets_internal(&clickhouse_assets).await },
+            5,
+            |e| is_network_error(&e.to_string()),
+            "clickhouse insert assets",
+        )
+        .await;
+
+        match bulk_result {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                tracing::warn!(
+                    "Bulk insert failed: {}. Trying individual inserts to identify problematic asset.",
+                    e
+                );
+
+                // Try inserting one by one to identify the problematic asset
+                for (index, clickhouse_asset) in clickhouse_assets.iter().enumerate() {
+                    tracing::info!("Attempting to insert asset {} individually", index);
+
+                    let individual_result = with_retry(
+                        || async {
+                            let asset_clone = clickhouse_asset.clone();
+                            self.insert_assets_internal(&[asset_clone]).await
+                        },
+                        3,
+                        |e| is_network_error(&e.to_string()),
+                        &format!("clickhouse insert asset {}", index),
+                    )
+                    .await;
+
+                    match individual_result {
+                        Ok(()) => {
+                            tracing::info!("Successfully inserted asset {} individually", index)
+                        }
+                        Err(individual_e) => {
+                            tracing::error!(
+                                "Failed to insert asset {} individually: {}. Asset data: {:?}",
+                                index,
+                                individual_e,
+                                clickhouse_asset
+                            );
+                            return Err(individual_e);
+                        }
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    }
+
+    async fn get_all_assets(&self) -> Result<Vec<Asset>, Box<dyn std::error::Error + Send + Sync>> {
+        let query = "SELECT 
+            defuse_asset_identifier,
+            near_token_id,
+            intents_token_id,
+            decimals,
+            asset_name,
+            symbol,
+            min_deposit_amount,
+            min_withdrawal_amount,
+            withdrawal_fee,
+            standard,
+            blockchain,
+            price,
+            price_updated_at,
+            contract_address
+        FROM assets";
+
+        with_retry(
+            || async {
+                let rows = self
+                    .client
+                    .query(query)
+                    .fetch_all::<ClickhouseAssetRow>()
+                    .await?;
+
+                let mut assets = Vec::new();
+                for row in rows {
+                    let price_updated_at = row
+                        .price_updated_at
+                        .as_ref()
+                        .and_then(|dt_str| DateTime::parse_from_rfc3339(dt_str).ok())
+                        .map(|dt| dt.with_timezone(&Utc));
+
+                    assets.push(Asset {
+                        defuse_asset_identifier: row.defuse_asset_identifier,
+                        near_token_id: row.near_token_id,
+                        intents_token_id: row.intents_token_id,
+                        decimals: row.decimals as u8,
+                        asset_name: row.asset_name,
+                        symbol: row.symbol,
+                        min_deposit_amount: row.min_deposit_amount,
+                        min_withdrawal_amount: row.min_withdrawal_amount,
+                        withdrawal_fee: row.withdrawal_fee,
+                        standard: row.standard,
+                        blockchain: row.blockchain,
+                        price: row.price,
+                        price_updated_at,
+                        contract_address: row.contract_address,
+                    });
+                }
+
+                Ok(assets)
+            },
+            5,
+            |e: &Box<dyn std::error::Error + Send + Sync>| is_network_error(&e.to_string()),
+            "clickhouse get all assets",
+        )
+        .await
     }
 }

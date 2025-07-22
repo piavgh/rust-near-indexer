@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     Router,
     extract::{Path, Query, State},
@@ -6,7 +8,6 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 

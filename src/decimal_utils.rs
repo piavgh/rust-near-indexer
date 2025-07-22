@@ -1,6 +1,7 @@
+use std::str::FromStr;
+
 /// Utility functions for handling decimal amounts as u128 values.
 use rust_decimal::Decimal;
-use std::str::FromStr;
 
 /// Convert a rust_decimal::Decimal to u128 raw value for ClickHouse.
 /// Since the decimal values are already in smallest units (e.g., wei), we just need the raw integer value.

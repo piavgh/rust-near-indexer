@@ -1,6 +1,6 @@
-use crate::cache::ReceiptOrDataId;
-use crate::cache::receipts_cache::ReceiptsCacheArc;
-use crate::types::{EventJson, EventRow, SwapRow};
+use std::collections::HashMap;
+use std::str::FromStr;
+
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use near_lake_framework::near_indexer_primitives::{
@@ -9,9 +9,12 @@ use near_lake_framework::near_indexer_primitives::{
 };
 use rust_decimal::Decimal;
 use serde_json::from_str;
-use std::collections::HashMap;
-use std::str::FromStr;
 use tracing::{info, warn};
+
+use crate::asset_manager::AssetManager;
+use crate::cache::ReceiptOrDataId;
+use crate::cache::receipts_cache::ReceiptsCacheArc;
+use crate::types::{EventJson, EventRow, SwapRow};
 
 const TRACKING_CONTRACT: &str = "intents.near";
 const EVENT_JSON_PREFIX: &str = "EVENT_JSON:";
@@ -54,11 +57,18 @@ impl SwapData {
 
 pub struct ReceiptProcessor {
     pub receipts_cache: ReceiptsCacheArc,
+    pub asset_manager: std::sync::Arc<AssetManager>,
 }
 
 impl ReceiptProcessor {
-    pub fn new(receipts_cache: ReceiptsCacheArc) -> Self {
-        Self { receipts_cache }
+    pub fn new(
+        receipts_cache: ReceiptsCacheArc,
+        asset_manager: std::sync::Arc<AssetManager>,
+    ) -> Self {
+        Self {
+            receipts_cache,
+            asset_manager,
+        }
     }
 
     pub async fn process_receipt_outcomes(
@@ -100,7 +110,7 @@ impl ReceiptProcessor {
                         .await;
 
                     // Process the entire outcome
-                    self.process_outcome(&outcome, tx_hash, &header)
+                    self.process_outcome(&outcome, tx_hash, &header).await
                 }
             })
             .collect();
@@ -116,7 +126,7 @@ impl ReceiptProcessor {
         (all_events, all_swaps)
     }
 
-    fn process_outcome(
+    async fn process_outcome(
         &self,
         outcome: &IndexerExecutionOutcomeWithReceipt,
         tx_hash: String,
@@ -274,13 +284,30 @@ impl ReceiptProcessor {
                     Decimal::ZERO
                 });
 
+                // Get withdrawal fee from asset manager using destination_asset (intents_token_id)
+                let destination_asset = swap_data.destination_asset.clone().unwrap_or_default();
+                let withdrawal_fee_str = self
+                    .asset_manager
+                    .get_withdrawal_fee(&destination_asset)
+                    .await
+                    .unwrap_or_else(|| "0".to_string());
+
+                let withdrawal_fee_decimal =
+                    Decimal::from_str(&withdrawal_fee_str).unwrap_or_else(|_| {
+                        warn!(
+                            "Failed to parse withdrawal_fee '{}', using 0",
+                            withdrawal_fee_str
+                        );
+                        Decimal::ZERO
+                    });
+
                 swaps.push(SwapRow {
                     intent_hash: swap_data.intent_hash.unwrap_or_default(),
                     origin_asset: swap_data.origin_asset.unwrap_or_default(),
-                    destination_asset: swap_data.destination_asset.unwrap_or_default(),
+                    destination_asset,
                     amount_in: amount_in_decimal,
                     amount_out: amount_out_decimal,
-                    withdrawal_fee: Decimal::ZERO, // Default value for now
+                    withdrawal_fee: withdrawal_fee_decimal,
                     recipient: swap_data.recipient.unwrap_or_default(),
                     tx_hash: Some(tx_hash.clone()),
                 });

@@ -1,11 +1,13 @@
-use crate::cache::{ParentTransactionHashString, ReceiptOrDataId};
-use cached::{Cached, SizedCache};
-use near_lake_framework::near_indexer_primitives::CryptoHash;
-use redis::{AsyncCommands, Client, RedisError, RedisResult};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use cached::{Cached, SizedCache};
+use near_lake_framework::near_indexer_primitives::CryptoHash;
+use redis::{AsyncCommands, Client, RedisError, RedisResult};
 use tokio::sync::Mutex;
+
+use crate::cache::{ParentTransactionHashString, ReceiptOrDataId};
 
 pub struct ReceiptsCache {
     cache: SizedCache<ReceiptOrDataId, ParentTransactionHashString>,

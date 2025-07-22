@@ -1,6 +1,6 @@
 use crate::retry::{is_network_error, with_retry};
 use crate::storage::StorageBackend;
-use crate::types::{EventRow, SwapRow};
+use crate::types::{Asset, EventRow, SwapRow};
 use chrono::{DateTime, Utc};
 use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod};
 use rust_decimal::Decimal;
@@ -407,5 +407,143 @@ impl StorageBackend for PostgresDatabase {
             recipient: row.get(6),
             tx_hash: row.get(7),
         }))
+    }
+
+    async fn insert_assets(
+        &self,
+        assets: &[Asset],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if assets.is_empty() {
+            return Ok(());
+        }
+
+        with_retry(
+            || async {
+                let client = self.pool.get().await?;
+
+                // Use UPSERT (INSERT ... ON CONFLICT) to handle duplicates
+                let query = r#"
+                    INSERT INTO assets (
+                        defuse_asset_identifier,
+                        near_token_id,
+                        intents_token_id,
+                        decimals,
+                        asset_name,
+                        symbol,
+                        min_deposit_amount,
+                        min_withdrawal_amount,
+                        withdrawal_fee,
+                        standard,
+                        blockchain,
+                        price,
+                        price_updated_at,
+                        contract_address
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    ON CONFLICT (defuse_asset_identifier, intents_token_id)
+                    DO UPDATE SET
+                        near_token_id = EXCLUDED.near_token_id,
+                        decimals = EXCLUDED.decimals,
+                        asset_name = EXCLUDED.asset_name,
+                        symbol = EXCLUDED.symbol,
+                        min_deposit_amount = EXCLUDED.min_deposit_amount,
+                        min_withdrawal_amount = EXCLUDED.min_withdrawal_amount,
+                        withdrawal_fee = EXCLUDED.withdrawal_fee,
+                        standard = EXCLUDED.standard,
+                        blockchain = EXCLUDED.blockchain,
+                        price = EXCLUDED.price,
+                        price_updated_at = EXCLUDED.price_updated_at,
+                        contract_address = EXCLUDED.contract_address
+                "#;
+
+                let stmt = client.prepare(query).await?;
+
+                for asset in assets {
+                    client
+                        .execute(
+                            &stmt,
+                            &[
+                                &asset.defuse_asset_identifier,
+                                &asset.near_token_id,
+                                &asset.intents_token_id,
+                                &(asset.decimals as i16), // Convert u64 to i16 for SMALLINT
+                                &asset.asset_name,
+                                &asset.symbol,
+                                &asset.min_deposit_amount,
+                                &asset.min_withdrawal_amount,
+                                &asset.withdrawal_fee,
+                                &asset.standard,
+                                &asset.blockchain,
+                                &asset.price,
+                                &asset.price_updated_at,
+                                &asset.contract_address,
+                            ],
+                        )
+                        .await?;
+                }
+
+                Ok(())
+            },
+            5,
+            |e: &Box<dyn std::error::Error + Send + Sync>| is_network_error(&e.to_string()),
+            "postgres insert assets",
+        )
+        .await
+    }
+
+    async fn get_all_assets(&self) -> Result<Vec<Asset>, Box<dyn std::error::Error + Send + Sync>> {
+        with_retry(
+            || async {
+                let client = self.pool.get().await?;
+
+                let query = r#"
+                    SELECT
+                        defuse_asset_identifier,
+                        near_token_id,
+                        intents_token_id,
+                        decimals,
+                        asset_name,
+                        symbol,
+                        min_deposit_amount,
+                        min_withdrawal_amount,
+                        withdrawal_fee,
+                        standard,
+                        blockchain,
+                        price,
+                        price_updated_at,
+                        contract_address
+                    FROM assets
+                "#;
+
+                let rows = client.query(query, &[]).await?;
+
+                let mut assets = Vec::new();
+                for row in rows {
+                    let price_updated_at: Option<DateTime<Utc>> = row.get(12);
+
+                    assets.push(Asset {
+                        defuse_asset_identifier: row.get(0),
+                        near_token_id: row.get(1),
+                        intents_token_id: row.get(2),
+                        decimals: row.get::<_, i16>(3) as u8, // Convert i16 back to u8
+                        asset_name: row.get(4),
+                        symbol: row.get(5),
+                        min_deposit_amount: row.get(6),
+                        min_withdrawal_amount: row.get(7),
+                        withdrawal_fee: row.get(8),
+                        standard: row.get(9),
+                        blockchain: row.get(10),
+                        price: row.get(11),
+                        price_updated_at,
+                        contract_address: row.get(13),
+                    });
+                }
+
+                Ok(assets)
+            },
+            5,
+            |e: &Box<dyn std::error::Error + Send + Sync>| is_network_error(&e.to_string()),
+            "postgres get all assets",
+        )
+        .await
     }
 }

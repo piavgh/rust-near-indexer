@@ -15,7 +15,6 @@ indexer:
       timeout_seconds: 30
       max_requests_per_second: 8.0
       poll_interval_ms: 200
-      cache_size: 1000
       max_retries: 3
 
 shutdown:
@@ -30,3 +29,10 @@ storage:
     user: ""
     password: ""
     database: ""
+
+asset_worker:
+  interval: 1m
+  mm_supported_tokens_url: "https://bridge.chaindefuser.com/rpc"
+  intents_supported_tokens_url: "https://1click.chaindefuser.com/v0/tokens"
+  max_retries: 3
+  timeout: 10s

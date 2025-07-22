@@ -1,4 +1,6 @@
 mod api;
+mod asset_manager;
+mod asset_worker;
 mod cache;
 mod config;
 mod data_source;
@@ -10,6 +12,17 @@ mod shutdown_coordinator;
 mod storage;
 mod types;
 
+use std::env;
+use std::sync::Arc;
+
+use clap::Parser;
+use dotenvy::dotenv;
+use redis::cmd;
+use tokio::sync::Mutex;
+use tracing::{error, info, warn};
+
+use crate::asset_manager::AssetManager;
+use crate::asset_worker::AssetWorker;
 use crate::cache::receipts_cache::ReceiptsCache;
 use crate::cache::{CACHE_EXPIRATION_BLOCKS, CACHE_SIZE};
 use crate::config::{AppConfig, init_tracing};
@@ -19,13 +32,6 @@ use crate::shutdown_coordinator::ShutdownCoordinator;
 use crate::storage::StorageBackend;
 use crate::storage::clickhouse::ClickhouseDatabase;
 use crate::storage::postgres::PostgresDatabase;
-use clap::Parser;
-use dotenvy::dotenv;
-use redis::cmd;
-use std::env;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::{error, info, warn};
 
 #[derive(Parser, Debug)]
 #[clap(author = "Hoang Trinh <hoang.trinhj@gmail.com>", version, about)]
@@ -167,6 +173,43 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
     let shutdown_coordinator = ShutdownCoordinator::new(config.shutdown);
 
     if config.indexer.enabled {
+        // Create shared AssetManager instance for both receipt processor and asset worker
+        let shared_asset_storage: Arc<dyn StorageBackend + Send + Sync> =
+            match storage_backend.as_str() {
+                "postgres" => {
+                    let connection_string = &config.storage.postgres.connection_string;
+                    let postgres_database = PostgresDatabase::new(connection_string).await.ok_or(
+                        "Failed to create PostgreSQL database connection for shared asset manager",
+                    )?;
+                    Arc::new(postgres_database)
+                }
+                "clickhouse" | _ => {
+                    let url = &config.storage.clickhouse.url;
+                    let user = &config.storage.clickhouse.user;
+                    let password = &config.storage.clickhouse.password;
+                    let database = &config.storage.clickhouse.database;
+                    let clickhouse_db = ClickhouseDatabase::new(url, user, password, database);
+                    Arc::new(clickhouse_db)
+                }
+            };
+
+        let shared_asset_manager = Arc::new(AssetManager::new(shared_asset_storage));
+
+        let asset_worker =
+            AssetWorker::new(shared_asset_manager.clone(), config.asset_worker.clone());
+        let asset_cancellation_token = shutdown_coordinator.token.clone();
+
+        shutdown_coordinator.tracker.spawn(async move {
+            asset_worker.start(asset_cancellation_token).await;
+        });
+
+        // Wait for asset manager to have data before starting event handler
+        info!("Waiting for asset data to be loaded...");
+        while !shared_asset_manager.has_data().await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+        info!("Asset data loaded, starting event handler...");
+
         info!("Getting last processed block height...");
         let last_height = storage.get_last_height().await.unwrap_or_else(|e| {
             warn!(
@@ -229,7 +272,7 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
             }
         };
 
-        let receipt_processor = ReceiptProcessor::new(receipts_cache);
+        let receipt_processor = ReceiptProcessor::new(receipts_cache, shared_asset_manager);
         let event_handler = EventHandler::new(storage, receipt_processor);
 
         shutdown_coordinator.tracker.spawn(async move {

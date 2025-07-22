@@ -3,42 +3,37 @@ CREATE TABLE IF NOT EXISTS events
 (
     block_height                     BIGINT NOT NULL,
     block_timestamp                  TIMESTAMP WITH TIME ZONE NOT NULL,
-    block_hash                       VARCHAR(64) NOT NULL,
+    block_hash                       TEXT NOT NULL,
     contract_id                      TEXT NOT NULL,
-    execution_status                 VARCHAR(50) NOT NULL,
-    version                          VARCHAR(10) NOT NULL,
-    standard                         VARCHAR(20) NOT NULL,
+    execution_status                 TEXT NOT NULL,
+    version                          TEXT NOT NULL,
+    standard                         TEXT NOT NULL,
     index_in_log                     BIGINT NOT NULL,
     event                            TEXT NOT NULL,
     data                             TEXT NOT NULL,
-    related_receipt_id               VARCHAR(64) NOT NULL,
+    related_receipt_id               TEXT NOT NULL,
     related_receipt_receiver_id      TEXT NOT NULL,
     related_receipt_predecessor_id   TEXT NOT NULL,
-    tx_hash                          VARCHAR(64),
+    tx_hash                          TEXT,
 
     -- Primary key constraint equivalent to ClickHouse PRIMARY KEY
     PRIMARY KEY (block_height, related_receipt_id, index_in_log)
 );
 
--- Create indexes for performance optimization equivalent to ClickHouse indexes
-CREATE INDEX IF NOT EXISTS idx_events_block_timestamp 
-    ON events (block_timestamp);
+-- Create indexes for performance optimization based on actual query patterns
 
-CREATE INDEX IF NOT EXISTS idx_events_contract_id 
-    ON events USING HASH (contract_id);
-
-CREATE INDEX IF NOT EXISTS idx_events_related_receipt_id 
-    ON events USING HASH (related_receipt_id);
-
-CREATE INDEX IF NOT EXISTS idx_events_related_receipt_receiver_id 
-    ON events USING HASH (related_receipt_receiver_id);
-
--- Create additional indexes for common queries
+-- B-tree index optimized for MAX(block_height) queries in get_last_height()
 CREATE INDEX IF NOT EXISTS idx_events_block_height 
-    ON events (block_height DESC); -- Optimize for querying last block height
+    ON events (block_height DESC);
 
+-- Partial B-tree index for transaction hash lookups - critical for get_events() WHERE tx_hash = ? queries
+-- Uses partial index to save space since many events may not have tx_hash
 CREATE INDEX IF NOT EXISTS idx_events_tx_hash 
     ON events (tx_hash) WHERE tx_hash IS NOT NULL;
+
+-- Composite index for ORDER BY block_height DESC, index_in_log DESC in get_events() queries
+CREATE INDEX IF NOT EXISTS idx_events_order_by 
+    ON events (block_height DESC, index_in_log DESC);
 
 -- Add comments to document the schema
 COMMENT ON TABLE events IS 'NEAR blockchain events indexed from transaction receipts';

@@ -7,17 +7,18 @@
 
 pub mod neardata_api;
 
+use std::error::Error;
+
 use near_lake_framework::LakeConfigBuilder;
 use near_lake_framework::near_indexer_primitives::StreamerMessage;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::info;
 
-use crate::data_source::neardata_api::NearDataApiWorker;
+use crate::data_source::neardata_api::{NearDataApiConfig, NearDataApiWorker};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,29 +31,6 @@ pub enum DataSourceType {
 pub struct DataSourceConfig {
     pub source_type: DataSourceType,
     pub neardata_api: Option<NearDataApiConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct NearDataApiConfig {
-    pub base_url: String,
-    pub timeout_seconds: u64,
-    pub max_requests_per_second: f64,
-    pub poll_interval_ms: u64,
-    pub cache_size: usize,
-    pub max_retries: u32,
-}
-
-impl Default for NearDataApiConfig {
-    fn default() -> Self {
-        Self {
-            base_url: "https://mainnet.neardata.xyz".to_string(),
-            timeout_seconds: 30,
-            max_requests_per_second: 8.0, // Conservative to respect bandwidth limits
-            poll_interval_ms: 200,
-            cache_size: 1000,
-            max_retries: 3,
-        }
-    }
 }
 
 /// Create a stream of NEAR blockchain data from the configured data source

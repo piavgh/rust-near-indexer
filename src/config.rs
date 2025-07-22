@@ -1,9 +1,11 @@
+use std::env;
+
 use figment::Figment;
 use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
-use std::env;
 use tracing::info;
 
+use crate::asset_worker::AssetWorkerConfig;
 use crate::data_source::DataSourceConfig;
 use crate::shutdown_coordinator::ShutdownConfig;
 use crate::storage::StorageConfig;
@@ -15,6 +17,7 @@ pub struct AppConfig {
     pub shutdown: ShutdownConfig,
     pub storage: StorageConfig,
     pub http: HTTPConfig,
+    pub asset_worker: AssetWorkerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]

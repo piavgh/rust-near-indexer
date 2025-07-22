@@ -1,10 +1,11 @@
 pub mod clickhouse;
 pub mod postgres;
 
+use serde::Deserialize;
+
 use crate::storage::clickhouse::ClickhouseConfig;
 use crate::storage::postgres::PostgresConfig;
-use crate::types::{EventRow, SwapRow};
-use serde::Deserialize;
+use crate::types::{Asset, EventRow, SwapRow};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct StorageConfig {
@@ -47,4 +48,13 @@ pub trait StorageBackend: Send + Sync {
         &self,
         intent_hash: &str,
     ) -> Result<Option<SwapRow>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Insert assets into the database
+    async fn insert_assets(
+        &self,
+        assets: &[Asset],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Get all assets from the database
+    async fn get_all_assets(&self) -> Result<Vec<Asset>, Box<dyn std::error::Error + Send + Sync>>;
 }
