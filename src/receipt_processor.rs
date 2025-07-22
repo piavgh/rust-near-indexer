@@ -280,6 +280,7 @@ impl ReceiptProcessor {
                     destination_asset: swap_data.destination_asset.unwrap_or_default(),
                     amount_in: amount_in_decimal,
                     amount_out: amount_out_decimal,
+                    withdrawal_fee: Decimal::ZERO, // Default value for now
                     recipient: swap_data.recipient.unwrap_or_default(),
                     tx_hash: Some(tx_hash.clone()),
                 });

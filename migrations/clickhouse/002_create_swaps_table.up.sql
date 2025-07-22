@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS swaps
     destination_asset   String COMMENT 'The asset being swapped to',
     amount_in           UInt128 COMMENT 'The amount of origin asset in smallest units (wei)',
     amount_out          UInt128 COMMENT 'The amount of destination asset in smallest units (wei)',
+    withdrawal_fee      UInt128 COMMENT 'The withdrawal fee for the swap in smallest units (wei)',
     recipient           String COMMENT 'The recipient address of the swap',
     tx_hash             Nullable(String) COMMENT 'The transaction hash associated with this swap',
 

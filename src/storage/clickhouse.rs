@@ -67,6 +67,7 @@ struct ClickhouseSwapRow {
     destination_asset: String,
     amount_in: u128,
     amount_out: u128,
+    withdrawal_fee: u128,
     recipient: String,
     tx_hash: Option<String>,
 }
@@ -79,6 +80,7 @@ impl From<&SwapRow> for ClickhouseSwapRow {
             destination_asset: swap_row.destination_asset.clone(),
             amount_in: decimal_to_u128(swap_row.amount_in),
             amount_out: decimal_to_u128(swap_row.amount_out),
+            withdrawal_fee: decimal_to_u128(swap_row.withdrawal_fee),
             recipient: swap_row.recipient.clone(),
             tx_hash: swap_row.tx_hash.clone(),
         }
@@ -365,15 +367,16 @@ impl StorageBackend for ClickhouseDatabase {
         intent_hash: &str,
     ) -> Result<Option<SwapRow>, Box<dyn std::error::Error + Send + Sync>> {
         let query = format!(
-            "SELECT 
-                intent_hash, 
-                origin_asset, 
-                destination_asset, 
-                amount_in, 
-                amount_out, 
-                recipient, 
-                tx_hash 
-            FROM swaps 
+            "SELECT
+                intent_hash,
+                origin_asset,
+                destination_asset,
+                amount_in,
+                amount_out,
+                withdrawal_fee,
+                recipient,
+                tx_hash
+            FROM swaps
             WHERE intent_hash = '{}'",
             intent_hash
         );
@@ -395,6 +398,7 @@ impl StorageBackend for ClickhouseDatabase {
             destination_asset: row.destination_asset.clone(),
             amount_in: u128_to_decimal(row.amount_in),
             amount_out: u128_to_decimal(row.amount_out),
+            withdrawal_fee: u128_to_decimal(row.withdrawal_fee),
             recipient: row.recipient.clone(),
             tx_hash: row.tx_hash.clone(),
         }))

@@ -186,22 +186,23 @@ impl PostgresDatabase {
             // Process in chunks to avoid too many parameters
             let mut query = String::from(
                 "INSERT INTO swaps (
-                intent_hash, origin_asset, destination_asset, amount_in, amount_out, recipient, tx_hash
+                intent_hash, origin_asset, destination_asset, amount_in, amount_out, withdrawal_fee, recipient, tx_hash
             ) VALUES ",
             );
 
             let values_parts: Vec<String> = (0..chunk.len())
                 .map(|i| {
-                    let base = i * 7 + 1;
+                    let base = i * 8 + 1;
                     format!(
-                        "(${}, ${}, ${}, ${}, ${}, ${}, ${})",
+                        "(${}, ${}, ${}, ${}, ${}, ${}, ${}, ${})",
                         base,
                         base + 1,
                         base + 2,
                         base + 3,
                         base + 4,
                         base + 5,
-                        base + 6
+                        base + 6,
+                        base + 7
                     )
                 })
                 .collect();
@@ -213,6 +214,7 @@ impl PostgresDatabase {
                 destination_asset = EXCLUDED.destination_asset,
                 amount_in = EXCLUDED.amount_in,
                 amount_out = EXCLUDED.amount_out,
+                withdrawal_fee = EXCLUDED.withdrawal_fee,
                 recipient = EXCLUDED.recipient,
                 tx_hash = EXCLUDED.tx_hash",
             );
@@ -226,6 +228,7 @@ impl PostgresDatabase {
                 params.push(&row.destination_asset);
                 params.push(&row.amount_in);
                 params.push(&row.amount_out);
+                params.push(&row.withdrawal_fee);
                 params.push(&row.recipient);
                 params.push(&row.tx_hash);
             }
@@ -375,15 +378,16 @@ impl StorageBackend for PostgresDatabase {
     ) -> Result<Option<SwapRow>, Box<dyn std::error::Error + Send + Sync>> {
         let client = self.pool.get().await?;
 
-        let query = "SELECT 
-            intent_hash, 
-            origin_asset, 
-            destination_asset, 
-            amount_in, 
-            amount_out, 
-            recipient, 
-            tx_hash 
-        FROM swaps 
+        let query = "SELECT
+            intent_hash,
+            origin_asset,
+            destination_asset,
+            amount_in,
+            amount_out,
+            withdrawal_fee,
+            recipient,
+            tx_hash
+        FROM swaps
         WHERE intent_hash = $1";
 
         let rows = client.query(query, &[&intent_hash]).await?;
@@ -399,8 +403,9 @@ impl StorageBackend for PostgresDatabase {
             destination_asset: row.get(2),
             amount_in: row.get::<_, Decimal>(3),
             amount_out: row.get::<_, Decimal>(4),
-            recipient: row.get(5),
-            tx_hash: row.get(6),
+            withdrawal_fee: row.get::<_, Decimal>(5),
+            recipient: row.get(6),
+            tx_hash: row.get(7),
         }))
     }
 }

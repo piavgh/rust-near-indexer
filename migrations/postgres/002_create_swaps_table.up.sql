@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS swaps
     destination_asset   TEXT NOT NULL,
     amount_in           NUMERIC NOT NULL,
     amount_out          NUMERIC NOT NULL,
+    withdrawal_fee      NUMERIC NOT NULL,
     recipient           TEXT NOT NULL,
     tx_hash             TEXT
 );
@@ -27,5 +28,6 @@ COMMENT ON COLUMN swaps.origin_asset IS 'The asset being swapped from';
 COMMENT ON COLUMN swaps.destination_asset IS 'The asset being swapped to';
 COMMENT ON COLUMN swaps.amount_in IS 'The amount of origin asset';
 COMMENT ON COLUMN swaps.amount_out IS 'The amount of destination asset';
+COMMENT ON COLUMN swaps.withdrawal_fee IS 'The withdrawal fee for the swap';
 COMMENT ON COLUMN swaps.recipient IS 'The recipient address of the swap';
 COMMENT ON COLUMN swaps.tx_hash IS 'The transaction hash associated with this swap';

@@ -27,6 +27,7 @@ pub struct SwapRow {
     pub destination_asset: String,
     pub amount_in: Decimal,
     pub amount_out: Decimal,
+    pub withdrawal_fee: Decimal,
     pub recipient: String,
     pub tx_hash: Option<String>,
 }
