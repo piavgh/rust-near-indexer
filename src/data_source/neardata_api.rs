@@ -6,8 +6,10 @@
 
 use std::error::Error;
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::num::NonZeroU32;
+use std::time::Duration;
 
+use governor::{Quota, RateLimiter};
 use near_lake_framework::near_indexer_primitives::StreamerMessage;
 use reqwest::Client;
 use serde::Deserialize;
@@ -86,7 +88,11 @@ pub struct NearDataApiWorker {
     client: Client,
     config: NearDataApiConfig,
     current_height: u64,
-    rate_limiter: RateLimiter,
+    rate_limiter: RateLimiter<
+        governor::state::NotKeyed,
+        governor::state::InMemoryState,
+        governor::clock::DefaultClock,
+    >,
     retry_count: u32,
 }
 
@@ -101,7 +107,12 @@ impl NearDataApiWorker {
             .user_agent("near-intents-indexer/0.1.0")
             .build()?;
 
-        let rate_limiter = RateLimiter::new(config.max_requests_per_second);
+        // Create rate limiter with governor crate - allows bursts up to the per-second limit
+        let quota = Quota::per_second(
+            NonZeroU32::new(config.max_requests_per_second as u32)
+                .unwrap_or(NonZeroU32::new(1).unwrap()),
+        );
+        let rate_limiter = RateLimiter::direct(quota);
 
         Ok(Self {
             sender,
@@ -165,9 +176,9 @@ impl NearDataApiWorker {
         info!("neardata-server API worker stopped");
     }
 
-    async fn fetch_and_send_block(&mut self) -> Result<(), NearDataApiError> {
-        // Apply rate limiting
-        self.rate_limiter.wait().await;
+    async fn fetch_and_send_block(&self) -> Result<(), NearDataApiError> {
+        // Apply rate limiting - this will wait if we exceed the rate limit
+        self.rate_limiter.until_ready().await;
 
         // Fetch the block from API
         let block = self.fetch_block(self.current_height).await?;
@@ -182,10 +193,13 @@ impl NearDataApiWorker {
                 }
                 // Unexpected channel error - should be logged
                 _ => {
-                    error!("Unexpected channel send error for block {}: {:?}", self.current_height, e);
+                    error!(
+                        "Unexpected channel send error for block {}: {:?}",
+                        self.current_height, e
+                    );
                     Err(NearDataApiError::Parse("Channel send failed".to_string()))
                 }
-            }
+            };
         }
 
         Ok(())
@@ -214,46 +228,6 @@ impl NearDataApiWorker {
                 let error_text = format!("Unexpected status code: {}", status);
                 Err(NearDataApiError::Parse(error_text))
             }
-        }
-    }
-}
-
-/// Simple token bucket rate limiter
-struct RateLimiter {
-    tokens: f64,
-    capacity: f64,
-    refill_rate: f64, // tokens per second
-    last_refill: Instant,
-}
-
-impl RateLimiter {
-    fn new(requests_per_second: f64) -> Self {
-        let capacity = requests_per_second; // Allow burst up to 1 second worth
-
-        Self {
-            tokens: capacity,
-            capacity,
-            refill_rate: requests_per_second,
-            last_refill: Instant::now(),
-        }
-    }
-
-    async fn wait(&mut self) {
-        // Refill tokens based on elapsed time
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_refill);
-        let tokens_to_add = elapsed.as_secs_f64() * self.refill_rate;
-
-        self.tokens = (self.tokens + tokens_to_add).min(self.capacity);
-        self.last_refill = now;
-
-        // If we don't have enough tokens, wait
-        if self.tokens < 1.0 {
-            let wait_time = Duration::from_secs_f64(1.0 / self.refill_rate);
-            sleep(wait_time).await;
-            self.tokens = 0.0; // We'll get one token after the wait
-        } else {
-            self.tokens -= 1.0;
         }
     }
 }
