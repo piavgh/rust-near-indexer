@@ -12,7 +12,6 @@ mod shutdown_coordinator;
 mod storage;
 mod types;
 
-use std::env;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -143,29 +142,39 @@ async fn run_indexer(config: AppConfig) -> Result<(), Box<dyn std::error::Error 
     }
     info!("{} connection successful!", storage_backend);
 
-    info!("Initializing Redis client...");
+    // Initialize Redis client if URL is provided
+    let redis_client = if let Some(redis_url) = &config.cache.redis_url {
+        info!("Initializing Redis client...");
 
-    // Initializes Redis client using environment variables.
-    // Environment variables required:
-    // - `REDIS_URL` (optional, will return None if not set)
-    let redis_connection_string = env::var("REDIS_URL").expect("REDIS_URL not set in environment");
-    let redis_client = redis::Client::open(redis_connection_string);
-
-    // Check Redis connection if client was created successfully
-    let redis_client = if let Ok(client) = redis_client {
-        let mut conn = client.get_multiplexed_async_connection().await?;
-
-        let pong: String = cmd("PING").query_async(&mut conn).await?;
-
-        if pong != "PONG" {
-            warn!("Redis PING returned unexpected response: {}", pong);
-            None
-        } else {
-            info!("Redis connection verified successfully");
-            Some(client)
+        match redis::Client::open(redis_url.as_str()) {
+            Ok(client) => match client.get_multiplexed_async_connection().await {
+                Ok(mut conn) => match cmd("PING").query_async::<String>(&mut conn).await {
+                    Ok(pong) => {
+                        if pong != "PONG" {
+                            warn!("Redis PING returned unexpected response: {}", pong);
+                            None
+                        } else {
+                            info!("Redis connection verified successfully");
+                            Some(client)
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to ping Redis: {}", e);
+                        None
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to connect to Redis: {}", e);
+                    None
+                }
+            },
+            Err(e) => {
+                warn!("Failed to create Redis client: {}", e);
+                None
+            }
         }
     } else {
-        warn!("Failed to create Redis client");
+        info!("No Redis URL provided, using in-memory cache only");
         None
     };
 

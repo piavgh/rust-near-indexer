@@ -36,3 +36,6 @@ asset_worker:
   intents_supported_tokens_url: "https://1click.chaindefuser.com/v0/tokens"
   max_retries: 3
   timeout: 10s
+
+cache:
+  redis_url: "redis://localhost:6379"

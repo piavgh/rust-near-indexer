@@ -6,6 +6,7 @@ use serde::Deserialize;
 use tracing::info;
 
 use crate::asset_worker::AssetWorkerConfig;
+use crate::cache::CacheConfig;
 use crate::data_source::DataSourceConfig;
 use crate::shutdown_coordinator::ShutdownConfig;
 use crate::storage::StorageConfig;
@@ -18,6 +19,7 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub http: HTTPConfig,
     pub asset_worker: AssetWorkerConfig,
+    pub cache: CacheConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,8 +50,8 @@ impl AppConfig {
                         "CLICKHOUSE_PASSWORD",
                         "CLICKHOUSE_DB",
                         "HTTP_BIND_ADDRESS",
-                        "HTTP_MODE",
                         "HTTP_PREFIX",
+                        "REDIS_URL",
                     ])
                     .map(|k| match k.as_str() {
                         "STORAGE_BACKEND" => "storage.backend".into(),
@@ -59,8 +61,8 @@ impl AppConfig {
                         "CLICKHOUSE_PASSWORD" => "storage.clickhouse.password".into(),
                         "CLICKHOUSE_DB" => "storage.clickhouse.database".into(),
                         "HTTP_BIND_ADDRESS" => "http.bind_address".into(),
-                        "HTTP_MODE" => "http.mode".into(),
                         "HTTP_PREFIX" => "http.prefix".into(),
+                        "REDIS_URL" => "cache.redis_url".into(),
                         _ => k.as_str().into(),
                     })
                     .split("."),
